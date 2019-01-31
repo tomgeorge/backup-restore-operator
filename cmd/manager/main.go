@@ -7,11 +7,11 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/backup-restore-operator/pkg/apis"
-	"github.com/backup-restore-operator/pkg/controller"
 	"github.com/operator-framework/operator-sdk/pkg/k8sutil"
 	"github.com/operator-framework/operator-sdk/pkg/leader"
 	sdkVersion "github.com/operator-framework/operator-sdk/version"
+	"github.com/tomgeorge/backup-restore-operator/pkg/apis"
+	"github.com/tomgeorge/backup-restore-operator/pkg/controller"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -66,6 +66,7 @@ func main() {
 	}
 
 	log.Info("Registering Components.")
+	log.Info("Hi I'm Tom")
 
 	// Setup Scheme for all resources
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {
