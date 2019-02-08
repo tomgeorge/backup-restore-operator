@@ -12,6 +12,7 @@ type VolumeBackupProviderSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	ProviderType string `json:"providerType"`
+	BucketName   string `json:"bucketName"`
 }
 
 // VolumeBackupProviderStatus defines the observed state of VolumeBackupProvider
