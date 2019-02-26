@@ -12,6 +12,8 @@ spec:
         app: snapshot-controller
     spec:
       serviceAccountName: snapshot-controller-runner
+      imagePullSecrets:
+        - name: redhat-registry 
       containers:
         - name: snapshot-controller
           image: "registry.redhat.io/openshift3/snapshot-controller:latest"
