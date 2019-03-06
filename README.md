@@ -47,7 +47,7 @@ oc apply -f example/aws/aws-snapshot.yaml
 
 These commands:
 
-+ create an example PVC, which is provisioned in EBS
++ create an example PVC, which is provisioned in EBS.  The PV is created under the hood by the dynamic storage provisioner.
 + creates a snapshot object which looks at that PVC.
 
 After creating the snapshot, `oc get volumesnapshot` and `oc get volumesnapshotdata` should return results.  If you check the logs of the controller deployment, in the `snapshot-controller` container, you should see a message saying that your snapshot was created.
