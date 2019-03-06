@@ -73,44 +73,7 @@ cd $GOPATH/src/github.com
 git clone https://github.com/kubernetes-incubator/external-storage/
 cd snapshot
 make all
-    - lastTransitionTime: 2019-03-06T03:33:25Z
-      message: Snapshot created successfully
-      reason: ""
-      status: "True"
-      type: Ready
-    creationTimestamp: null
-- apiVersion: volumesnapshot.external-storage.k8s.io/v1
-  kind: VolumeSnapshotData
-  metadata:
-    creationTimestamp: 2019-03-06T03:33:25Z
-    generation: 1
-    name: k8s-volume-snapshot-999305c3-3fc0-11e9-b28a-54e1add9c45d
-    namespace: ""
-    resourceVersion: "403069"
-    selfLink: /apis/volumesnapshot.external-storage.k8s.io/v1/volumesnapshotdatas/k8s-volume-snapshot-999305c3-3fc0-11e9-b28a-54e1add9c45d
-    uid: 99722028-3fc0-11e9-b0a0-5254008a48f2
-  spec:
-    hostPath:
-      snapshot: /tmp/9991cadd-3fc0-11e9-b28a-54e1add9c45d.tgz
-    persistentVolumeRef:
-      kind: PersistentVolume
-      name: hostpath-pv
-    volumeSnapshotRef:
-      kind: VolumeSnapshot
-      name: default/snappyq-813f1dc0-3fc0-11e9-b0a0-5254008a48f2
-  status:
-    conditions:
-    - lastTransitionTime: 2019-03-06T03:33:25Z
-      message: Snapshot created successfully
-      reason: ""
-      status: "True"
-      type: Ready
-    creationTimestamp: null
-kind: List
-metadata:
-  resourceVersion: ""
-  selfLink: ""
-_output/bin/snapshot-controller -kubeconfig=/path/to/kube/config
+_output/bin/snapshot-controller -kubecontig=/path/to/kubeconfig
 ```
 
 ### Create the pv and pvc
