@@ -42,5 +42,6 @@ rules:
   - backups.example.com
   resources:
   - '*'
+  - volumebackups
   verbs:
   - '*'

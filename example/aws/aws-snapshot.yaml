@@ -1,0 +1,6 @@
+apiVersion: volumesnapshot.external-storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: snap-demo
+spec:
+  persistentVolumeClaimName: ebs-pvc
