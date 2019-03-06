@@ -7,4 +7,5 @@ spec:
   resources:
     requests:
       storage: 1Mi
-  storageClassName: snapshot-promoter
+  storageClassName: ""
+claimName: hostpath-pv

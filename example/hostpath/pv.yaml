@@ -7,5 +7,8 @@ spec:
     storage: 1Mi
   accessModes:
     - ReadWriteMany
+  claimRef:
+    namespace: default
+    name: hostpath-pvc
   hostPath:
     path: /tmp/test
