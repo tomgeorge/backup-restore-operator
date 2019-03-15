@@ -163,3 +163,140 @@ metadata:
   resourceVersion: ""
   selfLink: ""
 ```
+
+
+## Installing Velero on AWS
+
+From your host where you will be running `oc` commands:
+
+```shell
+wget https://github.com/heptio/velero/releases/download/v0.11.0/velero-v0.11.0-linux-amd64.tar.gz
+tar -xvf velero-v0.11.0-linux-amd64.tar.gz
+```
+
+Per the [Velero Docs](https://heptio.github.io/velero/v0.11.0/aws-config.html):
+
+
+    Velero requires an object storage bucket to store backups in, preferrably unique to a single Kubernetes cluster (see the FAQ for more details). Create an S3 bucket, replacing placeholders appropriately:
+
+    aws s3api create-bucket \
+        --bucket <YOUR_BUCKET> \
+        --region <YOUR_REGION> \
+        --create-bucket-configuration LocationConstraint=<YOUR_REGION>
+    NOTE: us-east-1 does not support a LocationConstraint. If your region is us-east-1, omit the bucket configuration:
+
+    aws s3api create-bucket \
+        --bucket <YOUR_BUCKET> \
+        --region us-east-1
+
+
+
+Create an IAM user:
+
+```shell
+ aws iam create-user --user-name velero
+ ```
+
+ Attach the correct policy to give velero the necessary permissions
+
+ ```shell
+  BUCKET=<YOUR_BUCKET>
+ cat > velero-policy.json <<EOF
+ {
+     "Version": "2012-10-17",
+     "Statement": [
+         {
+             "Effect": "Allow",
+             "Action": [
+                 "ec2:DescribeVolumes",
+                 "ec2:DescribeSnapshots",
+                 "ec2:CreateTags",
+                 "ec2:CreateVolume",
+                 "ec2:CreateSnapshot",
+                 "ec2:DeleteSnapshot"
+             ],
+             "Resource": "*"
+         },
+         {
+             "Effect": "Allow",
+             "Action": [
+                 "s3:GetObject",
+                 "s3:DeleteObject",
+                 "s3:PutObject",
+                 "s3:AbortMultipartUpload",
+                 "s3:ListMultipartUploadParts"
+             ],
+             "Resource": [
+                 "arn:aws:s3:::${BUCKET}/*"
+             ]
+         },
+         {
+             "Effect": "Allow",
+             "Action": [
+                 "s3:ListBucket"
+             ],
+             "Resource": [
+                 "arn:aws:s3:::${BUCKET}"
+             ]
+         }
+     ]
+ }
+ EOF
+
+ aws iam put-user-policy \
+   --user-name velero \
+   --policy-name velero \
+   --policy-document file://velero-policy.json
+   ```
+
+Create an access key:
+
+```shell
+aws iam create-access-key --user-name velero
+```
+
+This will return AWS credentials.  Take note of them.
+
+
+Create a Velero-specific credentials file (credentials-velero) in your local directory:
+
+```text
+ [default]
+ aws_access_key_id=<AWS_ACCESS_KEY_ID>
+ aws_secret_access_key=<AWS_SECRET_ACCESS_KEY>
+```
+
+where the access key id and secret are the values returned from the create-access-key request.
+
+Set up the namespaces and CRDs:
+
+```shell
+oc apply -f config/common/00-prereqs.yaml
+```
+
+Create the AWS secret from the credentials you just made
+
+```shell
+oc create secret generic cloud-credentials --namespace velero --from-file cloud=credentials-velero
+```
+
+Replace the values of `<YOUR_BUCKET>` and `<YOUR_REGION>` in `config/aws/05-backupstoragelocation.yaml`, and `config/aws/06-volumesnapshotlocation.yaml`
+
+Start the server
+
+```shell
+oc apply -f config/aws/05-backupstoragelocation.yaml
+oc apply -f config/aws/06-volumesnapshotlocation.yaml
+oc apply -f config/aws/10-deployment.yaml
+```
+
+### Snapshot example with PVs
+
+Replace the storage class in `config/nginx-app/with-pv.yaml` with `gp2` (the default storage class)
+
+```shell
+oc apply -f config/nginx-app/with-pv.yaml
+./velero backup create nginx-backup --include-namespaces nginx-example
+```
+
+
