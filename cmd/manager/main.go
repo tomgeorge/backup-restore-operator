@@ -66,7 +66,7 @@ func main() {
 	}
 
 	log.Info("Registering Components.")
-	log.Info("Hi I'm Tom")
+	log.Info(fmt.Sprintf("Registered namespace %s", namespace))
 
 	// Setup Scheme for all resources
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {

@@ -1,0 +1,4 @@
+Fluffy  Harold  cat f 1997-12-09  \N
+Claws   Gwen  cat   m   1994-03-17 \N
+Bowser  Diane   dog   m   1979-08-31  1995-07-29
+Slim  Benny   snake   m   1996-04-29  \N

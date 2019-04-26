@@ -4,4 +4,4 @@ metadata:
   name: example-volumebackup
 spec:
   # Add fields here
-  size: 3
+  applicationRef: mysql

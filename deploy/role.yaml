@@ -38,10 +38,12 @@ rules:
   verbs:
   - get
   - create
+  - list
 - apiGroups:
   - backups.example.com
   resources:
   - '*'
   - volumebackups
+  - volumebackupproviders
   verbs:
   - '*'

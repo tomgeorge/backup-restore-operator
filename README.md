@@ -300,3 +300,22 @@ oc apply -f config/nginx-app/with-pv.yaml
 ```
 
 
+### Backup flow 
+Given a request for backup of a pvc:
+Find all the pods that use that pvc
+Call freeze
+Use snapshot.external-storage.k8s.io api to create snapshot
+Watch VolumeSnapshot object until it has an id
+Unfreeze the pods
+Watch the VolumeSnapshot to wait for the upload to complete (get some ID that corresponds to the uploaded data)
+
+
+### Restore Flow
+Given a Restore object that references a Deployment, a PersistentVolumeClaim, and a VolumeSnapshotData object:
+Create a PVC with the snapshot-promoter storage class
+Update the deployment with the newly created PVC
+Application restarts
+Optional: Delete the old PVC
+
+
+Subsequent deployments of an application that has been restored could remove the previously restored data

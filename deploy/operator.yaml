@@ -16,7 +16,7 @@ spec:
       containers:
         - name: backup-restore-operator
           # Replace this with the built image name
-          image: REPLACE_IMAGE
+          image: 	172.30.1.1:5000/stateful-application/backup-restore-operator:v0.0.1
           ports:
           - containerPort: 60000
             name: metrics
