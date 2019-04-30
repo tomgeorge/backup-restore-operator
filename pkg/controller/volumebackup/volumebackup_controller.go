@@ -3,9 +3,13 @@ package volumebackup
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/go-logr/logr"
 	backupsv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
-
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -13,6 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -22,6 +29,24 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
+
+type Writer struct {
+	Str []string
+}
+
+func (w *Writer) Write(p []byte) (n int, err error) {
+	str := string(p)
+	if len(str) > 0 {
+		w.Str = append(w.Str, str)
+	}
+	return len(str), nil
+}
+
+func newStringReader(ss []string) io.Reader {
+	formattedString := strings.Join(ss, "\n")
+	reader := strings.NewReader(formattedString)
+	return reader
+}
 
 var log = logf.Log.WithName("controller_volumebackup")
 
@@ -86,7 +111,8 @@ type ReconcileVolumeBackup struct {
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
+	//reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
+	reqLogger := log
 	reqLogger.Info("Reconciling VolumeBackup")
 
 	// Fetch the VolumeBackup instance
@@ -126,19 +152,15 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	if err != nil {
 		reqLogger.Info("err is not nil")
 	}
-	kubeClient := kubernetes.NewForConfigOrDie()
+
+	kubeClient, kubeConfig, err := newClient()
+	if err != nil {
+		reqLogger.Error(err, "Error constructing kube client")
+	}
+
 	for _, pod := range pods.Items {
-		execRequest := kubeClient.CoreV1().RESTClient().Post().
-			Resource("pods").
-			Namespace(pod.Namespace).
-			Name(pod.Name).
-			SubResource("exec").
-			Param("container", pod.Spec.Containers[0].Name).
-			Param("command", deployment.Annotations["backups.example.com.pre-hook"]).
-			Param("stdin", "true").
-			Param("stdout", "true").
-			Param("stderr", "true")
-		reqLogger.Info(fmt.Sprintf("execRequest: %v", execRequest))
+		doRemoteExec(kubeClient, kubeConfig, pod, deployment, reqLogger)
+		reqLogger.Info(fmt.Sprintf("post doRemoteExec"))
 	}
 
 	return reconcile.Result{}, err
@@ -151,6 +173,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	// Check if this Pod already exists
+
 	found := &corev1.Pod{}
 	err = r.client.Get(context.TODO(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, found)
 	if err != nil && errors.IsNotFound(err) {
@@ -169,6 +192,54 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	// Pod already exists - don't requeue
 	reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
 	return reconcile.Result{}, nil
+}
+
+func doRemoteExec(clientSet *kubernetes.Clientset, config *rest.Config, pod corev1.Pod, deployment *appsv1.Deployment, logger logr.Logger) int {
+
+	command := pod.Annotations["backups.example.com.pre-hook"]
+	execRequest := clientSet.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Namespace(pod.Namespace).
+		Name(pod.Name).
+		SubResource("exec").
+		Param("container", pod.Spec.Containers[0].Name).
+		Param("command", command).
+		Param("stdin", "true").
+		Param("stdout", "true").
+		Param("stderr", "true")
+	logger.Info(fmt.Sprintf("Running command %s on pod %s in container %s", command, pod.Name, pod.Spec.Containers[0].Name))
+
+	exec, err := remotecommand.NewSPDYExecutor(config, "POST", execRequest.URL())
+	if err != nil {
+		logger.Error(err, "Error exec-ing")
+	}
+
+	stdIn := newStringReader([]string{"-c", deployment.Annotations["backups.example.com.pre-hook"]})
+	stdOut := new(Writer)
+	stdErr := new(Writer)
+
+	err = exec.Stream(remotecommand.StreamOptions{
+		Stdin:  stdIn,
+		Stdout: stdOut,
+		Stderr: stdErr,
+		Tty:    false,
+	})
+
+	var exitCode int
+	if err == nil {
+		exitCode = 0
+		fmt.Println(stdOut.Str)
+	} else {
+		logger.Error(nil, fmt.Sprintf("exit code is %d", exitCode))
+		fmt.Println(stdOut.Str)
+		logger.Error(err, "Error")
+	}
+
+	fmt.Sprintf("Exit Code: %v", exitCode)
+	if exitCode != 0 {
+		exitCode = 2
+	}
+	return exitCode
 }
 
 // newPodForCR returns a busybox pod with the same name/namespace as the cr
@@ -192,4 +263,14 @@ func newPodForCR(cr *backupsv1alpha1.VolumeBackup) *corev1.Pod {
 			},
 		},
 	}
+}
+
+func newClient() (*kubernetes.Clientset, *rest.Config, error) {
+	kubeConfig, err := clientcmd.BuildConfigFromFlags("", filepath.Join(os.Getenv("HOME"), clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	clientSet := kubernetes.NewForConfigOrDie(kubeConfig)
+	return clientSet, kubeConfig, err
 }
