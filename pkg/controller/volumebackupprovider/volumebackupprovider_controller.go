@@ -19,6 +19,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
+// Identify the resource that was changed
+// Verify if the state of the world matches the expected state
+// Work on the differences
+
 var log = logf.Log.WithName("controller_volumebackupprovider")
 
 /**
@@ -82,7 +86,7 @@ type ReconcileVolumeBackupProvider struct {
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileVolumeBackupProvider) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
+	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Request", request)
 	reqLogger.Info("Reconciling VolumeBackupProvider")
 
 	// Fetch the VolumeBackupProvider instance

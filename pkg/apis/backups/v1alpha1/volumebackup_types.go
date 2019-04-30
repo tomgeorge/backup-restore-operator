@@ -12,6 +12,7 @@ type VolumeBackupSpec struct {
 	volumeBackupProviderRef string `json:"volumeBackupProviderRef"`
 	volumeClaimRef          string `json:"volumeClaimRef"`
 	authenticationSecret    string `json:"authenticationSecret"`
+	ApplicationRef          string `json:"applicationRef"`
 }
 
 // VolumeBackupStatus defines the observed state of VolumeBackup

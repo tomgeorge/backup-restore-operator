@@ -8,7 +8,7 @@ spec:
   accessModes:
     - ReadWriteMany
   claimRef:
-    namespace: default
+    namespace: nginx-example 
     name: hostpath-pvc
   hostPath:
     path: /tmp/test

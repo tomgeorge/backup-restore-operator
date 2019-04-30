@@ -2,6 +2,7 @@ apiVersion: backups.example.com/v1alpha1
 kind: VolumeBackupProvider
 metadata:
   name: example-volumebackupprovider
+  namespace: default
 spec:
   providerType: s3
   size: 3
