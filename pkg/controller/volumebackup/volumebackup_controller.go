@@ -1,6 +1,7 @@
 package volumebackup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -8,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/go-logr/logr"
 	backupsv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
@@ -42,8 +43,17 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	return len(str), nil
 }
 
+//func parseCommand(command string) (command string, args []string) {
+//	parts := strings.Split(command, " ")
+//	outCommand := parts[0]
+//	outArgs := []string{}
+//	append(parts[1:], outArgs)
+//	append
+//	return outCommand, outArgs
+//}
+
 func newStringReader(ss []string) io.Reader {
-	formattedString := strings.Join(ss, "\n")
+	formattedString := strings.Join(ss, " ")
 	reader := strings.NewReader(formattedString)
 	return reader
 }
@@ -128,7 +138,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
-	reqLogger.Info(fmt.Sprintf("Deployment to grab hook from is %v", instance.Spec.ApplicationRef))
+	reqLogger.Info(fmt.Sprintf("Deployment to grab hook from is %v in namespace %v", instance.Spec.ApplicationRef, instance.ObjectMeta.Namespace))
 
 	deployment := &appsv1.Deployment{}
 	foundDeployment := r.client.Get(context.TODO(), client.ObjectKey{
@@ -159,7 +169,9 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	for _, pod := range pods.Items {
-		doRemoteExec(kubeClient, kubeConfig, pod, deployment, reqLogger)
+		freezePod(kubeClient, kubeConfig, pod, deployment)
+		issueBackup()
+		unfreezePod(kubeClient, kubeConfig, pod, deployment)
 		reqLogger.Info(fmt.Sprintf("post doRemoteExec"))
 	}
 
@@ -194,45 +206,71 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	return reconcile.Result{}, nil
 }
 
-func doRemoteExec(clientSet *kubernetes.Clientset, config *rest.Config, pod corev1.Pod, deployment *appsv1.Deployment, logger logr.Logger) int {
+func issueBackup() {
+	log.Info(fmt.Sprintf("issued a backup"))
+}
 
-	command := pod.Annotations["backups.example.com.pre-hook"]
+func unfreezePod(clientSet *kubernetes.Clientset, config *rest.Config, pod corev1.Pod, deployment *appsv1.Deployment) int {
+	fmt.Printf("unfreeze the pod")
+	preHook := pod.Annotations["backups.example.com.post-hook"]
+	command := []string{"/bin/sh", "-i", "-c"}
+	command = append(command, preHook)
+	err := doRemoteExec(clientSet, config, command, pod)
+	return err
+}
+
+func freezePod(clientSet *kubernetes.Clientset, config *rest.Config, pod corev1.Pod, deployment *appsv1.Deployment) int {
+	preHook := pod.Annotations["backups.example.com.pre-hook"]
+	command := []string{"/bin/sh", "-i", "-c"}
+	command = append(command, preHook)
+	err := doRemoteExec(clientSet, config, command, pod)
+	return err
+}
+
+func doRemoteExec(clientSet *kubernetes.Clientset, config *rest.Config, command []string, pod corev1.Pod) int {
+
 	execRequest := clientSet.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Namespace(pod.Namespace).
 		Name(pod.Name).
 		SubResource("exec").
-		Param("container", pod.Spec.Containers[0].Name).
-		Param("command", command).
-		Param("stdin", "true").
-		Param("stdout", "true").
-		Param("stderr", "true")
-	logger.Info(fmt.Sprintf("Running command %s on pod %s in container %s", command, pod.Name, pod.Spec.Containers[0].Name))
+		Param("container", pod.Spec.Containers[0].Name)
+	execRequest.VersionedParams(&corev1.PodExecOptions{
+		Container: pod.Spec.Containers[0].Name,
+		Command:   command,
+		Stdin:     false,
+		Stdout:    true,
+		Stderr:    true,
+		TTY:       true,
+	}, scheme.ParameterCodec)
+
+	log.Info(fmt.Sprintf("Command is %v", command))
+	log.Info(fmt.Sprintf("Running command %s on pod %s in container %s", command, pod.Name, pod.Spec.Containers[0].Name))
 
 	exec, err := remotecommand.NewSPDYExecutor(config, "POST", execRequest.URL())
 	if err != nil {
-		logger.Error(err, "Error exec-ing")
+		log.Error(err, "Error exec-ing")
 	}
 
-	stdIn := newStringReader([]string{"-c", deployment.Annotations["backups.example.com.pre-hook"]})
-	stdOut := new(Writer)
-	stdErr := new(Writer)
+	var stdOut, stdErr bytes.Buffer
 
 	err = exec.Stream(remotecommand.StreamOptions{
-		Stdin:  stdIn,
-		Stdout: stdOut,
-		Stderr: stdErr,
-		Tty:    false,
+		Stdout: &stdOut,
+		Stderr: &stdErr,
+		Tty:    true,
 	})
 
 	var exitCode int
 	if err == nil {
 		exitCode = 0
-		fmt.Println(stdOut.Str)
+		log.Info("err is nil")
+		fmt.Println(stdOut.String())
+		fmt.Println(stdErr.String())
 	} else {
-		logger.Error(nil, fmt.Sprintf("exit code is %d", exitCode))
-		fmt.Println(stdOut.Str)
-		logger.Error(err, "Error")
+		log.Error(nil, fmt.Sprintf("exit code is %d", exitCode))
+		fmt.Println(stdOut.String())
+		fmt.Println(stdErr.String())
+		log.Error(err, "Error")
 	}
 
 	fmt.Sprintf("Exit Code: %v", exitCode)
