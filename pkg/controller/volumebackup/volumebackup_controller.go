@@ -212,9 +212,9 @@ func issueBackup() {
 
 func unfreezePod(clientSet *kubernetes.Clientset, config *rest.Config, pod corev1.Pod, deployment *appsv1.Deployment) int {
 	fmt.Printf("unfreeze the pod")
-	preHook := pod.Annotations["backups.example.com.post-hook"]
+	postHook := pod.Annotations["backups.example.com.post-hook"]
 	command := []string{"/bin/sh", "-i", "-c"}
-	command = append(command, preHook)
+	command = append(command, postHook)
 	err := doRemoteExec(clientSet, config, command, pod)
 	return err
 }
