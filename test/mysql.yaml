@@ -15,8 +15,10 @@ spec:
       labels:
         name: mysql2
       annotations:
-        backups.example.com.pre-hook: "flush tables with read lock;"
-        backups.example.com.post-hook: "unlock tables;"
+        #backups.example.com.pre-hook: "mysql -h 127.0.0.1 --user=root --password=$MYSQL_ROOT_PASSWORD --database=$MYSQL_DATABASE -e 'flush tables with read lock;'"
+        #backups.example.com.post-hook: "mysql -h 127.0.0.1 --user=root --password=$MYSQL_ROOT_PASSWORD --database=$MYSQL_DATABASE -e 'unlock tables;'"
+        backups.example.com.pre-hook: "mysql -h 127.0.0.1 --user=root --password=$MYSQL_ROOT_PASSWORD --database=$MYSQL_DATABASE -e 'select 1;'"
+        backups.example.com.post-hook: "mysql -h 127.0.0.1 --user=root --password=$MYSQL_ROOT_PASSWORD --database=$MYSQL_DATABASE -e 'select 1;'"
     spec:
       containers:
       - env:

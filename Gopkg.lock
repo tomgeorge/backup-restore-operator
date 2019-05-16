@@ -32,6 +32,15 @@
   version = "v1.1.1"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/docker/spdystream"
+  packages = [
+    ".",
+    "spdy"
+  ]
+  revision = "6480d4af844c189cf5dd913db24ddd339d3a4f85"
+
+[[projects]]
   name = "github.com/emicklei/go-restful"
   packages = [
     ".",
@@ -486,11 +495,14 @@
     "pkg/util/diff",
     "pkg/util/errors",
     "pkg/util/framer",
+    "pkg/util/httpstream",
+    "pkg/util/httpstream/spdy",
     "pkg/util/intstr",
     "pkg/util/json",
     "pkg/util/mergepatch",
     "pkg/util/naming",
     "pkg/util/net",
+    "pkg/util/remotecommand",
     "pkg/util/runtime",
     "pkg/util/sets",
     "pkg/util/strategicpatch",
@@ -502,6 +514,7 @@
     "pkg/version",
     "pkg/watch",
     "third_party/forked/golang/json",
+    "third_party/forked/golang/netutil",
     "third_party/forked/golang/reflect"
   ]
   revision = "eddba98df674a16931d2d4ba75edc3a389bf633a"
@@ -566,15 +579,19 @@
     "tools/pager",
     "tools/record",
     "tools/reference",
+    "tools/remotecommand",
     "transport",
+    "transport/spdy",
     "util/buffer",
     "util/cert",
     "util/connrotation",
+    "util/exec",
     "util/flowcontrol",
     "util/homedir",
     "util/integer",
     "util/jsonpath",
-    "util/retry"
+    "util/retry",
+    "util/workqueue"
   ]
   revision = "d082d5923d3cc0bfbb066ee5fbdea3d0ca79acf8"
 
@@ -643,6 +660,12 @@
   revision = "ced9eb3070a5f1c548ef46e8dfe2a97c208d9f03"
 
 [[projects]]
+  name = "k8s.io/kubernetes"
+  packages = ["pkg/api/legacyscheme"]
+  revision = "b7394102d6ef778017f2ca4046abbaa23b88c290"
+  version = "v1.14.1"
+
+[[projects]]
   name = "sigs.k8s.io/controller-runtime"
   packages = [
     "pkg/cache",
@@ -650,15 +673,26 @@
     "pkg/client",
     "pkg/client/apiutil",
     "pkg/client/config",
+    "pkg/controller",
+    "pkg/controller/controllerutil",
+    "pkg/event",
+    "pkg/handler",
+    "pkg/internal/controller",
+    "pkg/internal/controller/metrics",
     "pkg/internal/recorder",
     "pkg/leaderelection",
     "pkg/manager",
     "pkg/metrics",
     "pkg/patch",
+    "pkg/predicate",
+    "pkg/reconcile",
     "pkg/recorder",
     "pkg/runtime/inject",
     "pkg/runtime/log",
+    "pkg/runtime/scheme",
     "pkg/runtime/signals",
+    "pkg/source",
+    "pkg/source/internal",
     "pkg/webhook/admission",
     "pkg/webhook/admission/types",
     "pkg/webhook/types"
@@ -669,6 +703,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "c85b3db32c7be3d1c7317041497232cbf237b80741cdf892b4288e2a6ae971b5"
+  inputs-digest = "65aadd5ebc4d00b72cc768badc5d2ac45bf598f0973c44106991b2e1821c7dd4"
   solver-name = "gps-cdcl"
   solver-version = 1

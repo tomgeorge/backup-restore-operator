@@ -5,3 +5,6 @@ metadata:
 spec:
   # Add fields here
   applicationRef: mysql
+  volumeBackupProviderRef: asdf
+  volumeClaimRef: asdffff
+  authenticationSecret: asdfadfcvnmcxb
