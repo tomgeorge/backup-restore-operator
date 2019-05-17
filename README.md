@@ -1,4 +1,16 @@
-# Cluster Setup
+# Running the operator
+
+Create a deployment with a `pre-hook` and a `post-hook`
+
+`oc apply -f test/mysql.yaml`
+
+Start the operator:
+
+`operator-sdk up local`
+
+Right now, the command just executes the pre and post hook, and logs a message saying that a backup has been dispatched, without creating the underlying object.
+
+# Cluster Setup (this is an explanation of how the external-storage backup API works)
 
 I am using minishift/hostpath for local development.  I have tested the AWS functionality on an Openshift 4 cluster in AWS.  The hostpath functionality has been tested on a kubernetes 1.13 cluster in Digitalocean and in minishift/minikube.
 
