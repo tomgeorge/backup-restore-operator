@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
+	snapclientset "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned"
 	backupsv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -170,12 +172,12 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 
 	for _, pod := range pods.Items {
 		freezePod(kubeClient, kubeConfig, pod, deployment)
-		issueBackup()
+		issueBackup(&pod, kubeConfig)
 		unfreezePod(kubeClient, kubeConfig, pod, deployment)
 		reqLogger.Info(fmt.Sprintf("post doRemoteExec"))
 	}
 
-	return reconcile.Result{}, err
+	// 	return reconcile.Result{}, err
 	// Define a new Pod object
 	pod := newPodForCR(instance)
 
@@ -206,8 +208,29 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	return reconcile.Result{}, nil
 }
 
-func issueBackup() {
-	log.Info(fmt.Sprintf("issued a backup"))
+func issueBackup(pod *corev1.Pod, config *rest.Config) {
+	log.Info(fmt.Sprintf("In issuebackup"))
+	log.Info(fmt.Sprintf("taking backup of pod %v, volume %v", pod.Name, pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName))
+	className := "do-block-storage"
+	snapshot := &v1alpha1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("snapshot-%v-volume-%v", pod.Name, pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName),
+			Namespace: "kube-system",
+		},
+		Spec: v1alpha1.VolumeSnapshotSpec{
+			Source: &corev1.TypedLocalObjectReference{
+				Name: pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName,
+				Kind: "PersistentVolumeClaim",
+			},
+			VolumeSnapshotClassName: &className,
+		},
+	}
+
+	snapClient, err := snapclientset.NewForConfig(config)
+	if err != nil {
+		log.Error(err, "Error creating snapshot client")
+	}
+	snapClient.VolumesnapshotV1alpha1().VolumeSnapshots("kube-system").Create(snapshot)
 }
 
 func unfreezePod(clientSet *kubernetes.Clientset, config *rest.Config, pod corev1.Pod, deployment *appsv1.Deployment) int {

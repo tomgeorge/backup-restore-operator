@@ -42,7 +42,8 @@ spec:
             secretKeyRef:
               key: database-name
               name: mysql
-        image: 172.30.1.1:5000/openshift/mysql@sha256:8d750876687d9fb0adf46020e38cd43165b906208d2e81088b3a13213e751df3
+              #image: 172.30.1.1:5000/openshift/mysql@sha256:8d750876687d9fb0adf46020e38cd43165b906208d2e81088b3a13213e751df3
+        image: mysql
         imagePullPolicy: IfNotPresent
         livenessProbe:
           failureThreshold: 3
@@ -75,8 +76,9 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
-        - mountPath: /var/lib/mysql/data
+        - mountPath: /mysql-data
           name: mysql-data
+          subPath: mysql-data
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       schedulerName: default-scheduler
