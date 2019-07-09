@@ -275,7 +275,7 @@ func doRemoteExec(clientSet *kubernetes.Clientset, config *rest.Config, command 
 		log.Error(err, "Error")
 	}
 
-	fmt.Sprintf("Exit Code: %v", exitCode)
+	log.Info(fmt.Sprintf("Exit Code: %v", exitCode))
 	if exitCode != 0 {
 		exitCode = 2
 	}
