@@ -28,29 +28,8 @@ spec:
         metadata:
           type: object
         spec:
-          properties:
-            applicationRef:
-              type: string
-            authenticationSecret:
-              type: string
-            volumeBackupProviderRef:
-              type: string
-            volumeClaimRef:
-              type: string
-          required:
-          - volumeBackupProviderRef
-          - volumeClaimRef
-          - authenticationSecret
-          - applicationRef
           type: object
         status:
-          properties:
-            backupRequests:
-              items:
-                type: object
-              type: array
-          required:
-          - backupRequests
           type: object
   version: v1alpha1
   versions:

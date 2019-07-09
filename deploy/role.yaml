@@ -45,5 +45,6 @@ rules:
   - '*'
   - volumebackups
   - volumebackupproviders
+  - volumeborkups
   verbs:
   - '*'

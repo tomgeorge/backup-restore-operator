@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
 	snapclientset "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned"
@@ -33,33 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-type Writer struct {
-	Str []string
-}
-
-func (w *Writer) Write(p []byte) (n int, err error) {
-	str := string(p)
-	if len(str) > 0 {
-		w.Str = append(w.Str, str)
-	}
-	return len(str), nil
-}
-
-//func parseCommand(command string) (command string, args []string) {
-//	parts := strings.Split(command, " ")
-//	outCommand := parts[0]
-//	outArgs := []string{}
-//	append(parts[1:], outArgs)
-//	append
-//	return outCommand, outArgs
-//}
-
-func newStringReader(ss []string) io.Reader {
-	formattedString := strings.Join(ss, " ")
-	reader := strings.NewReader(formattedString)
-	return reader
-}
-
 var log = logf.Log.WithName("controller_volumebackup")
 
 /**
@@ -75,7 +46,11 @@ func Add(mgr manager.Manager) error {
 
 // newReconciler returns a new reconcile.Reconciler
 func newReconciler(mgr manager.Manager) reconcile.Reconciler {
-	return &ReconcileVolumeBackup{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+	snapClientset, err := snapclientset.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		panic(err)
+	}
+	return &ReconcileVolumeBackup{client: mgr.GetClient(), config: mgr.GetConfig(), snapClientset: snapClientset, scheme: mgr.GetScheme()}
 }
 
 // add adds a new Controller to mgr with r as the reconcile.Reconciler
@@ -94,7 +69,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 
 	// TODO(user): Modify this to be the types you create that are owned by the primary resource
 	// Watch for changes to secondary resource Pods and requeue the owner VolumeBackup
-	err = c.Watch(&source.Kind{Type: &corev1.Pod{}}, &handler.EnqueueRequestForOwner{
+	err = c.Watch(&source.Kind{Type: &v1alpha1.VolumeSnapshot{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
 		OwnerType:    &backupsv1alpha1.VolumeBackup{},
 	})
@@ -111,8 +86,10 @@ var _ reconcile.Reconciler = &ReconcileVolumeBackup{}
 type ReconcileVolumeBackup struct {
 	// This client, initialized using mgr.Client() above, is a split client
 	// that reads objects from the cache and writes to the apiserver
-	client client.Client
-	scheme *runtime.Scheme
+	client        client.Client
+	config        *rest.Config
+	snapClientset snapclientset.Interface
+	scheme        *runtime.Scheme
 }
 
 // Reconcile reads that state of the cluster for a VolumeBackup object and makes changes based on the state read
@@ -155,25 +132,32 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 
 	pods := &corev1.PodList{}
 
-	selector, _ := metav1.LabelSelectorAsSelector(deployment.Spec.Selector)
+	selector, err := metav1.LabelSelectorAsSelector(deployment.Spec.Selector)
+	if err != nil {
+		reqLogger.Error(err, "Could not create selectors from label %v", deployment.Spec.Selector)
+		return reconcile.Result{}, err
+	}
+
 	err = r.client.List(context.TODO(), &client.ListOptions{
 		Namespace:     deployment.ObjectMeta.Namespace,
 		LabelSelector: selector,
 	}, pods)
 
 	if err != nil {
-		reqLogger.Info("err is not nil")
 	}
 
-	kubeClient, kubeConfig, err := newClient()
+	clientSet, err := kubernetes.NewForConfig(r.config)
 	if err != nil {
-		reqLogger.Error(err, "Error constructing kube client")
+		reqLogger.Error(err, "Error creating clientset: %v", err)
 	}
-
 	for _, pod := range pods.Items {
-		freezePod(kubeClient, kubeConfig, pod, deployment)
-		issueBackup(&pod, kubeConfig)
-		unfreezePod(kubeClient, kubeConfig, pod, deployment)
+		freezePod(clientSet, r.config, pod, deployment)
+		_, err := issueBackup(&pod, r.snapClientset)
+		if err != nil {
+			reqLogger.Error(err, "Error creating volumesnapshot")
+			return reconcile.Result{}, err
+		}
+		unfreezePod(clientSet, r.config, pod, deployment)
 		reqLogger.Info(fmt.Sprintf("post doRemoteExec"))
 	}
 
@@ -208,14 +192,14 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	return reconcile.Result{}, nil
 }
 
-func issueBackup(pod *corev1.Pod, config *rest.Config) {
+func issueBackup(pod *corev1.Pod, snapClientset snapclientset.Interface) (*v1alpha1.VolumeSnapshot, error) {
 	log.Info(fmt.Sprintf("In issuebackup"))
 	log.Info(fmt.Sprintf("taking backup of pod %v, volume %v", pod.Name, pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName))
 	className := "do-block-storage"
 	snapshot := &v1alpha1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("snapshot-%v-volume-%v", pod.Name, pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName),
-			Namespace: "kube-system",
+			Namespace: pod.Namespace,
 		},
 		Spec: v1alpha1.VolumeSnapshotSpec{
 			Source: &corev1.TypedLocalObjectReference{
@@ -226,15 +210,11 @@ func issueBackup(pod *corev1.Pod, config *rest.Config) {
 		},
 	}
 
-	snapClient, err := snapclientset.NewForConfig(config)
-	if err != nil {
-		log.Error(err, "Error creating snapshot client")
-	}
-	snapClient.VolumesnapshotV1alpha1().VolumeSnapshots("kube-system").Create(snapshot)
+	volumeSnapshot, err := snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(pod.Namespace).Create(snapshot)
+	return volumeSnapshot, err
 }
 
 func unfreezePod(clientSet *kubernetes.Clientset, config *rest.Config, pod corev1.Pod, deployment *appsv1.Deployment) int {
-	fmt.Printf("unfreeze the pod")
 	postHook := pod.Annotations["backups.example.com.post-hook"]
 	command := []string{"/bin/sh", "-i", "-c"}
 	command = append(command, postHook)
@@ -286,7 +266,6 @@ func doRemoteExec(clientSet *kubernetes.Clientset, config *rest.Config, command 
 	var exitCode int
 	if err == nil {
 		exitCode = 0
-		log.Info("err is nil")
 		fmt.Println(stdOut.String())
 		fmt.Println(stdErr.String())
 	} else {

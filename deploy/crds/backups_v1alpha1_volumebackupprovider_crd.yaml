@@ -9,7 +9,7 @@ spec:
     listKind: VolumeBackupProviderList
     plural: volumebackupproviders
     singular: volumebackupprovider
-  scope: Cluster
+  scope: Namespaced
   subresources:
     status: {}
   validation:
@@ -28,29 +28,8 @@ spec:
         metadata:
           type: object
         spec:
-          properties:
-            bucketName:
-              type: string
-            providerType:
-              description: 'INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-                Important: Run "operator-sdk generate k8s" to regenerate code after
-                modifying this file'
-              type: string
-          required:
-          - providerType
-          - bucketName
           type: object
         status:
-          properties:
-            backupProviders:
-              description: 'INSERT ADDITIONAL STATUS FIELD - define observed state
-                of cluster Important: Run "operator-sdk generate k8s" to regenerate
-                code after modifying this file'
-              items:
-                type: object
-              type: array
-          required:
-          - backupProviders
           type: object
   version: v1alpha1
   versions:

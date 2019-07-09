@@ -4,7 +4,4 @@ metadata:
   name: example-volumebackup
 spec:
   # Add fields here
-  applicationRef: mysql
-  volumeBackupProviderRef: asdf
-  volumeClaimRef: asdffff
-  authenticationSecret: asdfadfcvnmcxb
+  size: 3
