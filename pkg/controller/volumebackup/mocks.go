@@ -34,8 +34,8 @@ func newVolumeBackupList() *volumebackupv1alpha1.VolumeBackupList {
 	}
 }
 
-func newDeploymentAndPod(namespace, name string, replicas *int32) (*appsv1.Deployment, *corev1.Pod) {
-	deployment := &appsv1.Deployment{
+func newDeployment(namespace, name string, replicas *int32) *appsv1.Deployment {
+	return &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Deployment",
 			APIVersion: appsv1.SchemeGroupVersion.String(),
@@ -67,13 +67,15 @@ func newDeploymentAndPod(namespace, name string, replicas *int32) (*appsv1.Deplo
 			},
 		},
 	}
+}
 
-	pod := &corev1.Pod{
+func newPod(namespace, name string) *corev1.Pod {
+	return &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{
-				Name:    deployment.Spec.Template.Spec.Containers[0].Name,
-				Image:   deployment.Spec.Template.Spec.Containers[0].Image,
-				Command: deployment.Spec.Template.Spec.Containers[0].Command,
+				Name:    name,
+				Image:   "busybox",
+				Command: []string{"echo hello"},
 			}},
 			Volumes: []corev1.Volume{{
 				Name: "data",
@@ -94,20 +96,17 @@ func newDeploymentAndPod(namespace, name string, replicas *int32) (*appsv1.Deplo
 					APIVersion: corev1.SchemeGroupVersion.String(),
 					Kind:       "Deployment",
 					Name:       name,
-					//UID:        deployment.UID,
 				},
 			},
 			Labels: map[string]string{
 				"name": name,
 			},
-			Name:      deployment.Name + "-pod",
-			Namespace: deployment.Namespace,
+			Name:      name + "-pod",
+			Namespace: namespace,
 			Annotations: map[string]string{
 				"backups.example.com.pre-hook":  "echo freeze",
 				"backups.example.com.post-hook": "echo unfreeze",
 			},
 		},
 	}
-
-	return deployment, pod
 }
