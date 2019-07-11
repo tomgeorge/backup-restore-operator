@@ -26,46 +26,44 @@ type testCase struct {
 	expectedActions []core.Action
 }
 
-func testSuite(t *testing.T, testcases []testCase) {
+func runInTestHarness(t *testing.T, test testCase) {
 	snapshotscheme.AddToScheme(scheme.Scheme)
 	volumebackupv1alpha1.AddToScheme(scheme.Scheme)
-	for _, test := range testcases {
-		t.Logf("Running test case %s", test.name)
+	t.Logf("Running test case %s", test.name)
 
-		k8sClient := fakeClient.NewFakeClientWithScheme(scheme.Scheme, test.objs...)
-		snapClientset := fakeSnapshotClient.NewSimpleClientset(test.snapshotObjs...)
-		cfg := &rest.Config{}
+	k8sClient := fakeClient.NewFakeClientWithScheme(scheme.Scheme, test.objs...)
+	snapClientset := fakeSnapshotClient.NewSimpleClientset(test.snapshotObjs...)
+	cfg := &rest.Config{}
 
-		err := k8sClient.Create(context.TODO(), test.volumeBackup)
-		if err != nil {
-			t.Errorf("Error creating VolumeBackup: %v", err)
-		}
-
-		reconcileVolumeBackup := &ReconcileVolumeBackup{
-			scheme:        scheme.Scheme,
-			client:        k8sClient,
-			config:        cfg,
-			snapClientset: snapClientset,
-		}
-
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: test.volumeBackup.GetNamespace(),
-				Name:      test.volumeBackup.GetName(),
-			},
-		}
-
-		result, err := reconcileVolumeBackup.Reconcile(request)
-		if err != nil {
-			t.Errorf("Error reconciling object: %v", err)
-		}
-
-		if !result.Requeue {
-			t.Logf("Reconcile did not requeue request as expected")
-		}
-
-		evaluateResults(test, reconcileVolumeBackup, t)
+	err := k8sClient.Create(context.TODO(), test.volumeBackup)
+	if err != nil {
+		t.Errorf("Error creating VolumeBackup: %v", err)
 	}
+
+	reconcileVolumeBackup := &ReconcileVolumeBackup{
+		scheme:        scheme.Scheme,
+		client:        k8sClient,
+		config:        cfg,
+		snapClientset: snapClientset,
+	}
+
+	request := reconcile.Request{
+		NamespacedName: types.NamespacedName{
+			Namespace: test.volumeBackup.GetNamespace(),
+			Name:      test.volumeBackup.GetName(),
+		},
+	}
+
+	result, err := reconcileVolumeBackup.Reconcile(request)
+	if err != nil {
+		t.Errorf("Error reconciling object: %v", err)
+	}
+
+	if !result.Requeue {
+		t.Logf("Reconcile did not requeue request as expected")
+	}
+
+	evaluateResults(test, reconcileVolumeBackup, t)
 }
 
 func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBackup, t *testing.T) {
@@ -85,5 +83,4 @@ func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBa
 			t.Errorf("%v", pretty.Diff(expected, actual))
 		}
 	}
-
 }

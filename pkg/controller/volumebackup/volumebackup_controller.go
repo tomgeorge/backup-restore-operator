@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
 	snapclientset "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned"
@@ -147,11 +146,12 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 
 	for _, pod := range pods.Items {
 		r.freezePod(&pod)
-		_, err := r.issueBackup(instance, &pod)
+		err := r.issueBackup(instance, &pod)
 		if err != nil {
 			reqLogger.Error(err, "Error creating volumesnapshot")
 			return reconcile.Result{}, err
 		}
+		// TODO: Do we want to defer unfreezing the pod? can we even defer it if we don't know the pod beforehand? Could probably make another function
 		r.unfreezePod(&pod)
 		reqLogger.Info(fmt.Sprintf("post doRemoteExec"))
 	}
@@ -159,26 +159,48 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	return reconcile.Result{}, nil
 }
 
-func (r *ReconcileVolumeBackup) issueBackup(instance *backupsv1alpha1.VolumeBackup, pod *corev1.Pod) (*v1alpha1.VolumeSnapshot, error) {
-	log.Info(fmt.Sprintf("taking backup of pod %v, volume %v", pod.Name, pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName))
-	snapshot := r.createVolumeSnapshotFromPod(pod, instance.Spec.StorageClass)
-	if err := controllerutil.SetControllerReference(instance, snapshot, r.scheme); err != nil {
-		log.Error(err, "Unable to set owner reference of %v", snapshot.Name)
-		return nil, err
+func (r *ReconcileVolumeBackup) issueBackup(instance *backupsv1alpha1.VolumeBackup, pod *corev1.Pod) error {
+	snapshots := r.createVolumeSnapshotsFromPod(pod, instance.Spec.StorageClass)
+	for i, _ := range snapshots {
+		snapshot := &snapshots[i]
+		if err := r.requestCreate(snapshot, instance); err != nil {
+			return err
+		}
 	}
-	volumeSnapshot, err := r.snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(pod.Namespace).Create(snapshot)
-	return volumeSnapshot, err
+	return nil
 }
 
-func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, storageClass string) *v1alpha1.VolumeSnapshot {
+func (r *ReconcileVolumeBackup) requestCreate(snapshot *v1alpha1.VolumeSnapshot, instance *backupsv1alpha1.VolumeBackup) error {
+	if err := controllerutil.SetControllerReference(instance, snapshot, r.scheme); err != nil {
+		log.Error(err, "Unable to set owner reference of %v", snapshot.Name)
+		return err
+	}
+	_, err := r.snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Create(snapshot)
+	if err != nil {
+		log.Error(err, "Error creating VolumeSnapshot")
+		return err
+	}
+	return nil
+}
+
+func (r *ReconcileVolumeBackup) createVolumeSnapshotsFromPod(pod *corev1.Pod, storageClass string) []v1alpha1.VolumeSnapshot {
+	snapshots := []v1alpha1.VolumeSnapshot{}
+	for _, volume := range pod.Spec.Volumes {
+		snapshot := r.createVolumeSnapshotFromPod(pod, storageClass, volume)
+		snapshots = append(snapshots, *snapshot)
+	}
+	return snapshots
+}
+
+func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, storageClass string, volume corev1.Volume) *v1alpha1.VolumeSnapshot {
 	snapshot := &v1alpha1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%v-volume-%v", pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName, time.Now().Unix()),
+			Name:      fmt.Sprintf("%v-%v", pod.ObjectMeta.OwnerReferences[0].Name, volume.Name),
 			Namespace: pod.Namespace,
 		},
 		Spec: v1alpha1.VolumeSnapshotSpec{
 			Source: &corev1.TypedLocalObjectReference{
-				Name: pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName,
+				Name: volume.PersistentVolumeClaim.ClaimName,
 				Kind: "PersistentVolumeClaim",
 			},
 			VolumeSnapshotClassName: &storageClass,

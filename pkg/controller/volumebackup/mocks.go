@@ -1,6 +1,8 @@
 package volumebackup
 
 import (
+	"fmt"
+
 	volumebackupv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -70,7 +72,19 @@ func newDeployment(namespace, name string, replicas *int32) *appsv1.Deployment {
 	}
 }
 
-func newPod(namespace, name string) *corev1.Pod {
+func newPod(namespace, name string, volumeCount int) *corev1.Pod {
+	volumes := []corev1.Volume{}
+	for i := 0; i < volumeCount; i++ {
+		volume := corev1.Volume{
+			Name: fmt.Sprintf("data-%d", i),
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: fmt.Sprintf("test-claim-%d", i),
+				},
+			},
+		}
+		volumes = append(volumes, volume)
+	}
 	return &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{
@@ -78,14 +92,7 @@ func newPod(namespace, name string) *corev1.Pod {
 				Image:   "busybox",
 				Command: []string{"echo hello"},
 			}},
-			Volumes: []corev1.Volume{{
-				Name: "data",
-				VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: "test-claim",
-					},
-				},
-			}},
+			Volumes: volumes,
 		},
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",
