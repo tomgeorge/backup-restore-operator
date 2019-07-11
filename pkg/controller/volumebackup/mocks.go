@@ -7,7 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func newVolumeBackup(namespace, volumeBackupName, applicationRef string) *volumebackupv1alpha1.VolumeBackup {
+func newVolumeBackup(namespace, volumeBackupName, applicationRef, storageClass string) *volumebackupv1alpha1.VolumeBackup {
 	return &volumebackupv1alpha1.VolumeBackup{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: volumebackupv1alpha1.SchemeGroupVersion.String(),
@@ -19,6 +19,7 @@ func newVolumeBackup(namespace, volumeBackupName, applicationRef string) *volume
 		},
 		Spec: volumebackupv1alpha1.VolumeBackupSpec{
 			ApplicationRef: applicationRef,
+			StorageClass:   storageClass,
 		},
 	}
 }

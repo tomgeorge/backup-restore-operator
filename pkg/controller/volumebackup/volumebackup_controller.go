@@ -4,8 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
+	"time"
 
 	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
 	snapclientset "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned"
@@ -15,11 +14,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -144,61 +141,39 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	}, pods)
 
 	if err != nil {
+		reqLogger.Error(err, "Could not list pods for deployment %v", deployment.Name)
+		return reconcile.Result{}, err
 	}
 
-	clientSet, err := kubernetes.NewForConfig(r.config)
-	if err != nil {
-		reqLogger.Error(err, "Error creating clientset: %v", err)
-	}
 	for _, pod := range pods.Items {
-		freezePod(clientSet, r.config, pod, deployment)
-		_, err := issueBackup(&pod, r.snapClientset)
+		r.freezePod(&pod)
+		_, err := r.issueBackup(instance, &pod)
 		if err != nil {
 			reqLogger.Error(err, "Error creating volumesnapshot")
 			return reconcile.Result{}, err
 		}
-		unfreezePod(clientSet, r.config, pod, deployment)
+		r.unfreezePod(&pod)
 		reqLogger.Info(fmt.Sprintf("post doRemoteExec"))
 	}
 
-	// 	return reconcile.Result{}, err
-	// Define a new Pod object
-	pod := newPodForCR(instance)
-
-	// Set VolumeBackup instance as the owner and controller
-	if err := controllerutil.SetControllerReference(instance, pod, r.scheme); err != nil {
-		return reconcile.Result{}, err
-	}
-
-	// Check if this Pod already exists
-
-	found := &corev1.Pod{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, found)
-	if err != nil && errors.IsNotFound(err) {
-		reqLogger.Info("Creating a new Pod", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
-		err = r.client.Create(context.TODO(), pod)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-
-		// Pod created successfully - don't requeue
-		return reconcile.Result{}, nil
-	} else if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	// Pod already exists - don't requeue
-	reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
 	return reconcile.Result{}, nil
 }
 
-func issueBackup(pod *corev1.Pod, snapClientset snapclientset.Interface) (*v1alpha1.VolumeSnapshot, error) {
-	log.Info(fmt.Sprintf("In issuebackup"))
+func (r *ReconcileVolumeBackup) issueBackup(instance *backupsv1alpha1.VolumeBackup, pod *corev1.Pod) (*v1alpha1.VolumeSnapshot, error) {
 	log.Info(fmt.Sprintf("taking backup of pod %v, volume %v", pod.Name, pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName))
-	className := "do-block-storage"
+	snapshot := r.createVolumeSnapshotFromPod(pod, instance.Spec.StorageClass)
+	if err := controllerutil.SetControllerReference(instance, snapshot, r.scheme); err != nil {
+		log.Error(err, "Unable to set owner reference of %v", snapshot.Name)
+		return nil, err
+	}
+	volumeSnapshot, err := r.snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(pod.Namespace).Create(snapshot)
+	return volumeSnapshot, err
+}
+
+func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, storageClass string) *v1alpha1.VolumeSnapshot {
 	snapshot := &v1alpha1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("snapshot-%v-volume-%v", pod.Name, pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName),
+			Name:      fmt.Sprintf("%v-volume-%v", pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName, time.Now().Unix()),
 			Namespace: pod.Namespace,
 		},
 		Spec: v1alpha1.VolumeSnapshotSpec{
@@ -206,33 +181,31 @@ func issueBackup(pod *corev1.Pod, snapClientset snapclientset.Interface) (*v1alp
 				Name: pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName,
 				Kind: "PersistentVolumeClaim",
 			},
-			VolumeSnapshotClassName: &className,
+			VolumeSnapshotClassName: &storageClass,
 		},
 	}
-
-	volumeSnapshot, err := snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(pod.Namespace).Create(snapshot)
-	return volumeSnapshot, err
+	return snapshot
 }
 
-func unfreezePod(clientSet *kubernetes.Clientset, config *rest.Config, pod corev1.Pod, deployment *appsv1.Deployment) int {
+func (r *ReconcileVolumeBackup) unfreezePod(pod *corev1.Pod) int {
 	postHook := pod.Annotations["backups.example.com.post-hook"]
 	command := []string{"/bin/sh", "-i", "-c"}
 	command = append(command, postHook)
-	err := doRemoteExec(clientSet, config, command, pod)
+	err := r.doRemoteExec(pod, command)
 	return err
 }
 
-func freezePod(clientSet *kubernetes.Clientset, config *rest.Config, pod corev1.Pod, deployment *appsv1.Deployment) int {
+func (r *ReconcileVolumeBackup) freezePod(pod *corev1.Pod) int {
 	preHook := pod.Annotations["backups.example.com.pre-hook"]
 	command := []string{"/bin/sh", "-i", "-c"}
 	command = append(command, preHook)
-	err := doRemoteExec(clientSet, config, command, pod)
+	err := r.doRemoteExec(pod, command)
 	return err
 }
 
-func doRemoteExec(clientSet *kubernetes.Clientset, config *rest.Config, command []string, pod corev1.Pod) int {
-
-	execRequest := clientSet.CoreV1().RESTClient().Post().
+func (r *ReconcileVolumeBackup) doRemoteExec(pod *corev1.Pod, command []string) int {
+	cfg, err := kubernetes.NewForConfig(r.config)
+	execRequest := cfg.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Namespace(pod.Namespace).
 		Name(pod.Name).
@@ -250,7 +223,7 @@ func doRemoteExec(clientSet *kubernetes.Clientset, config *rest.Config, command 
 	log.Info(fmt.Sprintf("Command is %v", command))
 	log.Info(fmt.Sprintf("Running command %s on pod %s in container %s", command, pod.Name, pod.Spec.Containers[0].Name))
 
-	exec, err := remotecommand.NewSPDYExecutor(config, "POST", execRequest.URL())
+	exec, err := remotecommand.NewSPDYExecutor(r.config, "POST", execRequest.URL())
 	if err != nil {
 		log.Error(err, "Error exec-ing")
 	}
@@ -280,37 +253,4 @@ func doRemoteExec(clientSet *kubernetes.Clientset, config *rest.Config, command 
 		exitCode = 2
 	}
 	return exitCode
-}
-
-// newPodForCR returns a busybox pod with the same name/namespace as the cr
-func newPodForCR(cr *backupsv1alpha1.VolumeBackup) *corev1.Pod {
-	labels := map[string]string{
-		"app": cr.Name,
-	}
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cr.Name + "-pod",
-			Namespace: cr.Namespace,
-			Labels:    labels,
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:    "busybox",
-					Image:   "busybox",
-					Command: []string{"sleep", "3600"},
-				},
-			},
-		},
-	}
-}
-
-func newClient() (*kubernetes.Clientset, *rest.Config, error) {
-	kubeConfig, err := clientcmd.BuildConfigFromFlags("", filepath.Join(os.Getenv("HOME"), clientcmd.RecommendedHomeDir, clientcmd.RecommendedFileName))
-	if err != nil {
-		return nil, nil, err
-	}
-
-	clientSet := kubernetes.NewForConfigOrDie(kubeConfig)
-	return clientSet, kubeConfig, err
 }

@@ -14,6 +14,7 @@ type VolumeBackupSpec struct {
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	// Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html
 	ApplicationRef string `json:"applicationRef"`
+	StorageClass   string `json:"storageClass"`
 }
 
 // VolumeBackupStatus defines the observed state of VolumeBackup
@@ -25,7 +26,6 @@ type VolumeBackupStatus struct {
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
 // VolumeBackup is the Schema for the volumebackups API
 // +k8s:openapi-gen=true
 // +kubebuilder:subresource:status
@@ -38,7 +38,6 @@ type VolumeBackup struct {
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
 // VolumeBackupList contains a list of VolumeBackup
 type VolumeBackupList struct {
 	metav1.TypeMeta `json:",inline"`
