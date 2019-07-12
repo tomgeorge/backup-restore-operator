@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -90,8 +91,6 @@ type ReconcileVolumeBackup struct {
 
 // Reconcile reads that state of the cluster for a VolumeBackup object and makes changes based on the state read
 // and what is in the VolumeBackup.Spec
-// TODO(user): Modify this Reconcile function to implement your Controller logic.  This example creates
-// a Pod as an example
 // Note:
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
@@ -152,6 +151,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 			return reconcile.Result{}, err
 		}
 		// TODO: Do we want to defer unfreezing the pod? can we even defer it if we don't know the pod beforehand? Could probably make another function
+		// TODO: Check VolumeSnapshot.Status.ReadyToUse before unfreezing
 		r.unfreezePod(&pod)
 		reqLogger.Info(fmt.Sprintf("post doRemoteExec"))
 	}
@@ -160,7 +160,10 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 }
 
 func (r *ReconcileVolumeBackup) issueBackup(instance *backupsv1alpha1.VolumeBackup, pod *corev1.Pod) error {
-	snapshots := r.createVolumeSnapshotsFromPod(pod, instance.Spec.StorageClass)
+	snapshots, err := r.createVolumeSnapshotsFromPod(pod)
+	if err != nil {
+		return err
+	}
 	for i, _ := range snapshots {
 		snapshot := &snapshots[i]
 		if err := r.requestCreate(snapshot, instance); err != nil {
@@ -183,16 +186,38 @@ func (r *ReconcileVolumeBackup) requestCreate(snapshot *v1alpha1.VolumeSnapshot,
 	return nil
 }
 
-func (r *ReconcileVolumeBackup) createVolumeSnapshotsFromPod(pod *corev1.Pod, storageClass string) []v1alpha1.VolumeSnapshot {
+func (r *ReconcileVolumeBackup) createVolumeSnapshotsFromPod(pod *corev1.Pod) ([]v1alpha1.VolumeSnapshot, error) {
 	snapshots := []v1alpha1.VolumeSnapshot{}
 	for _, volume := range pod.Spec.Volumes {
-		snapshot := r.createVolumeSnapshotFromPod(pod, storageClass, volume)
-		snapshots = append(snapshots, *snapshot)
+		if volume.VolumeSource.PersistentVolumeClaim != nil {
+			snapshot, err := r.createVolumeSnapshotFromPod(pod, volume)
+			if err != nil {
+				return nil, err
+			}
+			snapshots = append(snapshots, *snapshot)
+		}
 	}
-	return snapshots
+	return snapshots, nil
 }
 
-func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, storageClass string, volume corev1.Volume) *v1alpha1.VolumeSnapshot {
+func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, volume corev1.Volume) (*v1alpha1.VolumeSnapshot, error) {
+	claim := &corev1.PersistentVolumeClaim{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{
+		Namespace: pod.Namespace,
+		Name:      volume.PersistentVolumeClaim.ClaimName,
+	}, claim)
+	if err != nil {
+		return nil, err
+	}
+	pv := &corev1.PersistentVolume{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{
+		Namespace: "",
+		Name:      claim.Spec.VolumeName,
+	}, pv)
+	if err != nil {
+		return nil, err
+	}
+
 	snapshot := &v1alpha1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%v-%v", pod.ObjectMeta.OwnerReferences[0].Name, volume.Name),
@@ -203,10 +228,11 @@ func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, sto
 				Name: volume.PersistentVolumeClaim.ClaimName,
 				Kind: "PersistentVolumeClaim",
 			},
-			VolumeSnapshotClassName: &storageClass,
+			// TODO: look up volume from claim name and get storage class from it
+			VolumeSnapshotClassName: &pv.Spec.StorageClassName,
 		},
 	}
-	return snapshot
+	return snapshot, nil
 }
 
 func (r *ReconcileVolumeBackup) unfreezePod(pod *corev1.Pod) int {

@@ -27,7 +27,7 @@ var (
 	}
 )
 
-func NewVolumeBackup(namespace, volumeBackupName, applicationRef, storageClass string) *volumebackupv1alpha1.VolumeBackup {
+func NewVolumeBackup(namespace, volumeBackupName, applicationRef string) *volumebackupv1alpha1.VolumeBackup {
 	return &volumebackupv1alpha1.VolumeBackup{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: volumebackupv1alpha1.SchemeGroupVersion.String(),
@@ -39,7 +39,6 @@ func NewVolumeBackup(namespace, volumeBackupName, applicationRef, storageClass s
 		},
 		Spec: volumebackupv1alpha1.VolumeBackupSpec{
 			ApplicationRef: applicationRef,
-			StorageClass:   storageClass,
 		},
 	}
 }

@@ -4,4 +4,3 @@ metadata:
   name: example-volumebackup
 spec:
   applicationRef: mysql
-  storageClass: do-block-storage

@@ -19,11 +19,27 @@ import (
 )
 
 type testCase struct {
-	name            string
-	objs            []runtime.Object
-	snapshotObjs    []runtime.Object
-	volumeBackup    *volumebackupv1alpha1.VolumeBackup
+	// The test case name, this will show up in the test logs
+	name string
+
+	// The runetime objects that the test expects to be in the cluster already.
+	// For example, to test a create action of a volumebackup, you would need a deployment with some pods.
+	// The deployment and pod(s) would go in objs.
+	objs []runtime.Object
+
+	// The VolumeSnapshot objects that the test expects to be in the cluster already.
+	// If you were testing a delete action, you would add a VolumeSnapshot object, and then
+	// issue a delete request in the test
+	snapshotObjs []runtime.Object
+
+	// A VolumeBackup object that is expected to be there when the test runs
+	volumeBackup *volumebackupv1alpha1.VolumeBackup
+
+	// The expected actions (Create/Update/Delete) that the snapshot client is supposed to perform
 	expectedActions []core.Action
+
+	// Should we skip this test?  Just for debugging purposes, please dont skip tests
+	skip bool
 }
 
 func runInTestHarness(t *testing.T, test testCase) {
