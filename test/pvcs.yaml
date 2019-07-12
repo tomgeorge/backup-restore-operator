@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: List
+items:
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: mysql2
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+    storageClassName: do-block-storage
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: mysql3
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+    storageClassName: do-block-storage
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: mysql4
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+    storageClassName: do-block-storage
