@@ -32,6 +32,13 @@ rules:
   verbs:
   - '*'
 - apiGroups:
+  - ""
+  resources:
+  - persistentvolumes
+  verbs:
+  - get
+  - list
+- apiGroups:
   - monitoring.coreos.com
   resources:
   - servicemonitors
@@ -47,3 +54,13 @@ rules:
   - volumebackupproviders
   verbs:
   - '*'
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshots
+  verbs:
+  - get
+  - list
+  - watch
+  - delete
+  - create

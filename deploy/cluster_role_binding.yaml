@@ -5,7 +5,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: backup-restore-operator
-  namespace: stateful-application
+  namespace: kube-system
 roleRef:
   kind: ClusterRole
   name: cluster-backup-restore-operator
