@@ -8,6 +8,7 @@ An operator to easily back up the data of a stateful application in Kubernetes. 
 
 1. [Prerequesites](#prereqs)
 2. [Installing the Operator](#install)
+3. [Creating a Backup](#create)
 
 ### Prerequisites <a name="prereqs"></a>
 
@@ -18,9 +19,26 @@ An operator to easily back up the data of a stateful application in Kubernetes. 
 
 ### Installing the Operator <a name="install"></a>
 
+`kubectl apply -f deploy/`
+
+This will create:
+
+- A backup-restore-operator `ServiceAccount` in the kube-system namespace
+- `ClusterRole` and `CluserRoleBinding` for the service account to perform necessary API operations
+- A backup-restore-operator `Deployment` that runs the controllers and watches for `VolumeBackup` requests.
+- `VolumeBackup` and `VolumeBackupProvider` CRDs.
 
 
-### Creating a Backup
+Verify that the operator is running:
+
+```
+λ ~/go/src/github.com/tomgeorge/backup-restore-operator/ master* kubectl get pods -n kube-system | grep backup
+backup-restore-operator-7c7c89d976-msx5z      1/1     Running   0          25s
+```
+
+Also check the logs to make sure you don't see any errors.
+
+### Creating a Backup <a name="create"></a>
 
 + Create a deployment with a `pre-hook` and `post-hook` to quiesce the application.  The following is an example mysql deployment with a volume and hooks to freeze/unfreeze the application:
 

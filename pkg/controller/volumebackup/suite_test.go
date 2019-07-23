@@ -2,6 +2,7 @@ package volumebackup
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -18,11 +19,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+// testCase contains options for the run of a test
 type testCase struct {
+
 	// The test case name, this will show up in the test logs
 	name string
 
-	// The runetime objects that the test expects to be in the cluster already.
+	// The runtime objects that the test expects to be in the cluster already.
 	// For example, to test a create action of a volumebackup, you would need a deployment with some pods.
 	// The deployment and pod(s) would go in objs.
 	objs []runtime.Object
@@ -38,6 +41,15 @@ type testCase struct {
 	// The expected actions (Create/Update/Delete) that the snapshot client is supposed to perform
 	expectedActions []core.Action
 
+	// The expected reconcile result
+	expectedResult reconcile.Result
+
+	// The expected errors that should occur during a test case
+	expectedError error
+
+	// Should this test cause a requeue?
+	requeue bool
+
 	// Should we skip this test?  Just for debugging purposes, please dont skip tests
 	skip bool
 }
@@ -51,11 +63,6 @@ func runInTestHarness(t *testing.T, test testCase) {
 	snapClientset := fakeSnapshotClient.NewSimpleClientset(test.snapshotObjs...)
 	cfg := &rest.Config{}
 
-	err := k8sClient.Create(context.TODO(), test.volumeBackup)
-	if err != nil {
-		t.Errorf("Error creating VolumeBackup: %v", err)
-	}
-
 	reconcileVolumeBackup := &ReconcileVolumeBackup{
 		scheme:        scheme.Scheme,
 		client:        k8sClient,
@@ -63,33 +70,43 @@ func runInTestHarness(t *testing.T, test testCase) {
 		snapClientset: snapClientset,
 	}
 
-	request := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Namespace: test.volumeBackup.GetNamespace(),
-			Name:      test.volumeBackup.GetName(),
-		},
-	}
+	request := reconcile.Request{}
 
+	// In some cases, you will want to test Reconciliation without a VolumeBackup having been
+	// created
+	if test.volumeBackup != nil {
+		fmt.Printf("This test does not have a volumebackup in the set-up")
+		err := k8sClient.Create(context.TODO(), test.volumeBackup)
+		if err != nil {
+			t.Errorf("Error creating VolumeBackup: %v", err)
+		}
+
+		request.NamespacedName = types.NamespacedName{
+			Namespace: test.volumeBackup.Namespace,
+			Name:      test.volumeBackup.Name,
+		}
+
+	} else {
+		request.NamespacedName = types.NamespacedName{
+			Namespace: "default",
+			Name:      "vb",
+		}
+	}
 	result, err := reconcileVolumeBackup.Reconcile(request)
-	if err != nil {
-		t.Errorf("Error reconciling object: %v", err)
-	}
-
-	if !result.Requeue {
-		t.Logf("Reconcile did not requeue request as expected")
-	}
-
-	evaluateResults(test, reconcileVolumeBackup, t)
+	evaluateResults(test, reconcileVolumeBackup, result, err, t)
 }
 
-func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBackup, t *testing.T) {
+func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBackup, result reconcile.Result, err error, t *testing.T) {
 	client, ok := reconcileVolumeBackup.snapClientset.(*fakeSnapshotClient.Clientset)
 	if !ok {
 		t.Errorf("Fatal - test %v - could not assert fakeSnapshotClient.Clientset type on snapshot client", testcase.name)
 	}
 
 	if len(client.Actions()) != len(testcase.expectedActions) {
-		t.Errorf("Error - test %v - expected %v actions received by client but was %v.  The test case is probably misconfigured", testcase.name, len(testcase.expectedActions), len(client.Actions()))
+		t.Errorf("Error - test %v - expected %v actions received by client but was %v", testcase.name, len(testcase.expectedActions), len(client.Actions()))
+		actualActions := client.Actions()
+		t.Errorf("%v", actualActions[0])
+		t.Errorf("%v", pretty.Diff(testcase.expectedActions, client.Actions()))
 		t.FailNow()
 	}
 	for index, expected := range testcase.expectedActions {
@@ -98,5 +115,15 @@ func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBa
 			t.Errorf("Error - test %v - objects do not match", testcase.name)
 			t.Errorf("%v", pretty.Diff(expected, actual))
 		}
+	}
+
+	if !reflect.DeepEqual(err, testcase.expectedError) {
+		t.Errorf("Error - test %v - expected error but got", testcase.name)
+		t.Errorf("%v", pretty.Diff(err, testcase.expectedError))
+	}
+
+	if !reflect.DeepEqual(result, testcase.expectedResult) {
+		t.Errorf("Error - test %v - result objects do not match", testcase.name)
+		t.Errorf("%v", pretty.Diff(result, testcase.expectedResult))
 	}
 }

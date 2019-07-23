@@ -1,12 +1,14 @@
 package volumebackup
 
 import (
+	"k8s.io/apimachinery/pkg/api/errors"
 	"testing"
 
 	helpers "github.com/tomgeorge/backup-restore-operator/pkg/controller/test/helpers"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	core "k8s.io/client-go/testing"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 func int32Pointer(n int32) *int32 {
@@ -30,7 +32,7 @@ func TestReconcile(t *testing.T) {
 
 	cases := []testCase{
 		{
-			name: "reconcile add",
+			name: "reconcile add - one container with one volume",
 			objs: []runtime.Object{
 				helpers.NewDeployment(namespace, applicationRef, &replicas),
 				helpers.NewPod(namespace, applicationRef, 1),
@@ -71,9 +73,51 @@ func TestReconcile(t *testing.T) {
 				),
 			},
 		},
+		{
+			name: "reconcile add - VolumeBackup object has not been created yet",
+			objs: []runtime.Object{
+				helpers.NewDeployment(namespace, applicationRef, &replicas),
+				helpers.NewPod(namespace, applicationRef, 1),
+				helpers.NewPersistentVolume("test-vol-0"),
+				helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
+			},
+			snapshotObjs:    []runtime.Object{},
+			expectedActions: []core.Action{},
+			expectedResult: reconcile.Result{
+				Requeue:      false,
+				RequeueAfter: 0,
+			},
+			expectedError: nil,
+		},
+		{
+			name:            "reconcile add - can't find deployment",
+			objs:            []runtime.Object{},
+			snapshotObjs:    []runtime.Object{},
+			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationRef),
+			expectedActions: []core.Action{},
+			expectedResult:  reconcile.Result{},
+			expectedError: errors.NewNotFound(schema.GroupResource{
+				Group:    "apps",
+				Resource: "deployments",
+			}, applicationRef),
+		},
+		{
+			name: "reconcile add - no pods available - basically a no-op",
+			objs: []runtime.Object{
+				helpers.NewDeployment(namespace, applicationRef, &replicas),
+				helpers.NewPersistentVolume("test-vol-0"),
+				helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
+			},
+			snapshotObjs:    []runtime.Object{},
+			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationRef),
+			expectedActions: []core.Action{},
+			expectedResult:  reconcile.Result{},
+		},
 	}
 
 	for _, testCase := range cases {
-		runInTestHarness(t, testCase)
+		if !testCase.skip {
+			runInTestHarness(t, testCase)
+		}
 	}
 }

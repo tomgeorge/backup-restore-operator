@@ -95,8 +95,8 @@ type ReconcileVolumeBackup struct {
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	//reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
-	reqLogger := log
+	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
+	//reqLogger := log
 	reqLogger.Info("Reconciling VolumeBackup")
 
 	// Fetch the VolumeBackup instance
@@ -115,14 +115,14 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	reqLogger.Info(fmt.Sprintf("Deployment to grab hook from is %v in namespace %v", instance.Spec.ApplicationRef, instance.ObjectMeta.Namespace))
 
 	deployment := &appsv1.Deployment{}
-	foundDeployment := r.client.Get(context.TODO(), client.ObjectKey{
+	err = r.client.Get(context.TODO(), client.ObjectKey{
 		Namespace: instance.ObjectMeta.Namespace,
 		Name:      instance.Spec.ApplicationRef,
 	}, deployment)
 
-	if foundDeployment != nil {
-		reqLogger.Info(fmt.Sprintf("Err object is not null %v", foundDeployment))
-	} else {
+	if err != nil {
+		reqLogger.Info(fmt.Sprintf("Error getting deployment: %v", err))
+		return reconcile.Result{}, err
 	}
 
 	pods := &corev1.PodList{}
@@ -133,6 +133,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		return reconcile.Result{}, err
 	}
 
+	//TODO: What happens if the pod is in a bad state (error, crashloop, etc.)?
 	err = r.client.List(context.TODO(), &client.ListOptions{
 		Namespace:     deployment.ObjectMeta.Namespace,
 		LabelSelector: selector,
@@ -153,7 +154,6 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		// TODO: Do we want to defer unfreezing the pod? can we even defer it if we don't know the pod beforehand? Could probably make another function
 		// TODO: Check VolumeSnapshot.Status.ReadyToUse before unfreezing
 		r.unfreezePod(&pod)
-		reqLogger.Info(fmt.Sprintf("post doRemoteExec"))
 	}
 
 	return reconcile.Result{}, nil

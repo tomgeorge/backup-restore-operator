@@ -2,5 +2,6 @@ apiVersion: backups.example.com/v1alpha1
 kind: VolumeBackup
 metadata:
   name: example-volumebackup
+  namespace: mysql
 spec:
   applicationRef: mysql
