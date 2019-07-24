@@ -20,7 +20,9 @@ An operator to easily back up the data of a stateful application in Kubernetes. 
 ### Installing the Operator <a name="install"></a>
 
 `kubectl create namespace backup-restore-operator`
+
 `kubectl apply -f deploy/`
+
 `kubectl apply -f deploy/crds/`
 
 This will create:
