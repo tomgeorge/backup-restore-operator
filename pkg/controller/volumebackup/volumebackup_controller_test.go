@@ -113,6 +113,36 @@ func TestReconcile(t *testing.T) {
 			expectedActions: []core.Action{},
 			expectedResult:  reconcile.Result{},
 		},
+		{
+			name: "reconcile add - volume does not exist",
+			objs: []runtime.Object{
+				helpers.NewDeployment(namespace, applicationRef, &replicas),
+				helpers.NewPod(namespace, applicationRef, 1),
+				helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
+			},
+			snapshotObjs:    []runtime.Object{},
+			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationRef),
+			expectedActions: []core.Action{},
+			expectedError: errors.NewNotFound(schema.GroupResource{
+				Group:    "",
+				Resource: "persistentvolumes",
+			}, "test-vol-0"),
+		},
+		{
+			name: "reconcile add - volume claim does not exist",
+			objs: []runtime.Object{
+				helpers.NewDeployment(namespace, applicationRef, &replicas),
+				helpers.NewPod(namespace, applicationRef, 1),
+				helpers.NewPersistentVolume("test-vol-0"),
+			},
+			snapshotObjs:    []runtime.Object{},
+			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationRef),
+			expectedActions: []core.Action{},
+			expectedError: errors.NewNotFound(schema.GroupResource{
+				Group:    "",
+				Resource: "persistentvolumeclaims",
+			}, "test-claim-0"),
+		},
 	}
 
 	for _, testCase := range cases {

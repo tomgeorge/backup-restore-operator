@@ -107,8 +107,6 @@ func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBa
 
 	if len(client.Actions()) != len(testcase.expectedActions) {
 		t.Errorf("Error - test %v - expected %v actions received by client but was %v", testcase.name, len(testcase.expectedActions), len(client.Actions()))
-		actualActions := client.Actions()
-		t.Errorf("%v", actualActions[0])
 		t.Errorf("%v", pretty.Diff(testcase.expectedActions, client.Actions()))
 		t.FailNow()
 	}

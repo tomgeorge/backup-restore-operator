@@ -145,7 +145,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 
 	for _, pod := range pods.Items {
 		if err := r.freezePod(&pod); err != nil {
-			reqLogger.Error(err, "Error freezing pod: %v", pod.Name)
+			reqLogger.Error(err, "Error freezing pod", "Pod.Name", pod.Name)
 			return reconcile.Result{}, err
 		}
 		if err = r.issueBackup(instance, &pod); err != nil {
@@ -155,7 +155,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		// TODO: Do we want to defer unfreezing the pod? can we even defer it if we don't know the pod beforehand? Could probably make another function
 		// TODO: Check VolumeSnapshot.Status.ReadyToUse before unfreezing
 		if err = r.unfreezePod(&pod); err != nil {
-			reqLogger.Error(err, "Error un-freezing pod: %v", pod.Name)
+			reqLogger.Error(err, "Error un-freezing pod", "Pod.Name", pod.Name)
 			return reconcile.Result{}, err
 		}
 	}

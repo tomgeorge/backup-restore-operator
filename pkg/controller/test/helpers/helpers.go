@@ -181,6 +181,53 @@ func NewPod(namespace, name string, volumeCount int) *corev1.Pod {
 	}
 }
 
+func NewPodWithCommand(namespace, name, command string, volumeCount int) *corev1.Pod {
+	volumes := []corev1.Volume{}
+	for i := 0; i < volumeCount; i++ {
+		volume := corev1.Volume{
+			Name: fmt.Sprintf("data-%d", i),
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: fmt.Sprintf("test-claim-%d", i),
+				},
+			},
+		}
+		volumes = append(volumes, volume)
+	}
+	return &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name:    name,
+				Image:   "busybox",
+				Command: []string{command},
+			}},
+			Volumes: volumes,
+		},
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Pod",
+			APIVersion: corev1.SchemeGroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: corev1.SchemeGroupVersion.String(),
+					Kind:       "Deployment",
+					Name:       name,
+				},
+			},
+			Labels: map[string]string{
+				"name": name,
+			},
+			Name:      name + "-pod",
+			Namespace: namespace,
+			Annotations: map[string]string{
+				"backups.example.com.pre-hook":  "echo freeze",
+				"backups.example.com.post-hook": "echo unfreeze",
+			},
+		},
+	}
+}
+
 func NewOwnerReference(apiversion, kind, name string) v1.OwnerReference {
 	isTrue := bool(true)
 	return v1.OwnerReference{

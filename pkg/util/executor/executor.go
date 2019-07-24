@@ -64,7 +64,6 @@ func (executor *RemotePodExecutor) DoRemoteExec(pod *corev1.Pod, command []strin
 
 	exec, err := remotecommand.NewSPDYExecutor(executor.config, "POST", execRequest.URL())
 	if err != nil {
-		log.Error(err, "Error exec-ing")
 		return -1, err
 	}
 
@@ -79,16 +78,16 @@ func (executor *RemotePodExecutor) DoRemoteExec(pod *corev1.Pod, command []strin
 	var exitCode int
 	if err == nil {
 		exitCode = 0
-		fmt.Println(stdOut.String())
-		fmt.Println(stdErr.String())
+		// fmt.Println(stdOut.String())
+		// fmt.Println(stdErr.String())
 	} else {
-		log.Error(nil, fmt.Sprintf("exit code is %d", exitCode))
-		fmt.Println(stdOut.String())
-		fmt.Println(stdErr.String())
+		// log.Error(nil, fmt.Sprintf("exit code is %d", exitCode))
+		// fmt.Println(stdOut.String())
+		// fmt.Println(stdErr.String())
 		return -1, err
 	}
 
-	log.Info(fmt.Sprintf("Exit Code: %v", exitCode))
+	// log.Info(fmt.Sprintf("Exit Code: %v", exitCode))
 	if exitCode != 0 {
 		exitCode = 2
 	}
