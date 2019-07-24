@@ -1,7 +1,0 @@
-apiVersion: backups.example.com/v1alpha1
-kind: VolumeBackup
-metadata:
-  name: example-volumebackup
-spec:
-  # Add fields here
-  size: 3

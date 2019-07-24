@@ -19,11 +19,13 @@ An operator to easily back up the data of a stateful application in Kubernetes. 
 
 ### Installing the Operator <a name="install"></a>
 
+`kubectl create namespace backup-restore-operator`
 `kubectl apply -f deploy/`
+`kubectl apply -f deploy/crds/`
 
 This will create:
 
-- A backup-restore-operator `ServiceAccount` in the kube-system namespace
+- A backup-restore-operator `ServiceAccount` in the backup-restore-operator namespace
 - `ClusterRole` and `CluserRoleBinding` for the service account to perform necessary API operations
 - A backup-restore-operator `Deployment` that runs the controllers and watches for `VolumeBackup` requests.
 - `VolumeBackup` and `VolumeBackupProvider` CRDs.
@@ -32,7 +34,7 @@ This will create:
 Verify that the operator is running:
 
 ```
-λ ~/go/src/github.com/tomgeorge/backup-restore-operator/ master* kubectl get pods -n kube-system | grep backup
+λ ~/go/src/github.com/tomgeorge/backup-restore-operator/ master* kubectl get pods -n backup-restore-operator | grep backup
 backup-restore-operator-7c7c89d976-msx5z      1/1     Running   0          25s
 ```
 
