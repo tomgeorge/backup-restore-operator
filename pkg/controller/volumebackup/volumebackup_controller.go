@@ -1,23 +1,20 @@
 package volumebackup
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 
 	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
 	snapclientset "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned"
 	backupsv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
+	"github.com/tomgeorge/backup-restore-operator/pkg/util/executor"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
-	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -47,7 +44,7 @@ func newReconciler(mgr manager.Manager) reconcile.Reconciler {
 	if err != nil {
 		panic(err)
 	}
-	return &ReconcileVolumeBackup{client: mgr.GetClient(), config: mgr.GetConfig(), snapClientset: snapClientset, scheme: mgr.GetScheme()}
+	return &ReconcileVolumeBackup{client: mgr.GetClient(), config: mgr.GetConfig(), snapClientset: snapClientset, scheme: mgr.GetScheme(), executor: executor.CreateNewRemotePodExecutor(mgr.GetConfig())}
 }
 
 // add adds a new Controller to mgr with r as the reconcile.Reconciler
@@ -87,6 +84,7 @@ type ReconcileVolumeBackup struct {
 	config        *rest.Config
 	snapClientset snapclientset.Interface
 	scheme        *runtime.Scheme
+	executor      executor.PodExecutor
 }
 
 // Reconcile reads that state of the cluster for a VolumeBackup object and makes changes based on the state read
@@ -134,6 +132,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	//TODO: What happens if the pod is in a bad state (error, crashloop, etc.)?
+	//TODO: maybe simulate this in the e2e stuff
 	err = r.client.List(context.TODO(), &client.ListOptions{
 		Namespace:     deployment.ObjectMeta.Namespace,
 		LabelSelector: selector,
@@ -145,15 +144,20 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	for _, pod := range pods.Items {
-		r.freezePod(&pod)
-		err := r.issueBackup(instance, &pod)
-		if err != nil {
+		if err := r.freezePod(&pod); err != nil {
+			reqLogger.Error(err, "Error freezing pod: %v", pod.Name)
+			return reconcile.Result{}, err
+		}
+		if err = r.issueBackup(instance, &pod); err != nil {
 			reqLogger.Error(err, "Error creating volumesnapshot")
 			return reconcile.Result{}, err
 		}
 		// TODO: Do we want to defer unfreezing the pod? can we even defer it if we don't know the pod beforehand? Could probably make another function
 		// TODO: Check VolumeSnapshot.Status.ReadyToUse before unfreezing
-		r.unfreezePod(&pod)
+		if err = r.unfreezePod(&pod); err != nil {
+			reqLogger.Error(err, "Error un-freezing pod: %v", pod.Name)
+			return reconcile.Result{}, err
+		}
 	}
 
 	return reconcile.Result{}, nil
@@ -235,70 +239,18 @@ func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, vol
 	return snapshot, nil
 }
 
-func (r *ReconcileVolumeBackup) unfreezePod(pod *corev1.Pod) int {
+func (r *ReconcileVolumeBackup) unfreezePod(pod *corev1.Pod) error {
 	postHook := pod.Annotations["backups.example.com.post-hook"]
 	command := []string{"/bin/sh", "-i", "-c"}
 	command = append(command, postHook)
-	err := r.doRemoteExec(pod, command)
+	_, err := r.executor.DoRemoteExec(pod, command)
 	return err
 }
 
-func (r *ReconcileVolumeBackup) freezePod(pod *corev1.Pod) int {
+func (r *ReconcileVolumeBackup) freezePod(pod *corev1.Pod) error {
 	preHook := pod.Annotations["backups.example.com.pre-hook"]
 	command := []string{"/bin/sh", "-i", "-c"}
 	command = append(command, preHook)
-	err := r.doRemoteExec(pod, command)
+	_, err := r.executor.DoRemoteExec(pod, command)
 	return err
-}
-
-func (r *ReconcileVolumeBackup) doRemoteExec(pod *corev1.Pod, command []string) int {
-	cfg, err := kubernetes.NewForConfig(r.config)
-	execRequest := cfg.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Namespace(pod.Namespace).
-		Name(pod.Name).
-		SubResource("exec").
-		Param("container", pod.Spec.Containers[0].Name)
-	execRequest.VersionedParams(&corev1.PodExecOptions{
-		Container: pod.Spec.Containers[0].Name,
-		Command:   command,
-		Stdin:     false,
-		Stdout:    true,
-		Stderr:    true,
-		TTY:       true,
-	}, scheme.ParameterCodec)
-
-	log.Info(fmt.Sprintf("Command is %v", command))
-	log.Info(fmt.Sprintf("Running command %s on pod %s in container %s", command, pod.Name, pod.Spec.Containers[0].Name))
-
-	exec, err := remotecommand.NewSPDYExecutor(r.config, "POST", execRequest.URL())
-	if err != nil {
-		log.Error(err, "Error exec-ing")
-	}
-
-	var stdOut, stdErr bytes.Buffer
-
-	err = exec.Stream(remotecommand.StreamOptions{
-		Stdout: &stdOut,
-		Stderr: &stdErr,
-		Tty:    true,
-	})
-
-	var exitCode int
-	if err == nil {
-		exitCode = 0
-		fmt.Println(stdOut.String())
-		fmt.Println(stdErr.String())
-	} else {
-		log.Error(nil, fmt.Sprintf("exit code is %d", exitCode))
-		fmt.Println(stdOut.String())
-		fmt.Println(stdErr.String())
-		log.Error(err, "Error")
-	}
-
-	log.Info(fmt.Sprintf("Exit Code: %v", exitCode))
-	if exitCode != 0 {
-		exitCode = 2
-	}
-	return exitCode
 }

@@ -10,6 +10,7 @@ import (
 	fakeSnapshotClient "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned/fake"
 	snapshotscheme "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned/scheme"
 	volumebackupv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
+	"github.com/tomgeorge/backup-restore-operator/pkg/util/executor"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -62,12 +63,14 @@ func runInTestHarness(t *testing.T, test testCase) {
 	k8sClient := fakeClient.NewFakeClientWithScheme(scheme.Scheme, test.objs...)
 	snapClientset := fakeSnapshotClient.NewSimpleClientset(test.snapshotObjs...)
 	cfg := &rest.Config{}
+	executor := executor.CreateNewFakePodExecutor()
 
 	reconcileVolumeBackup := &ReconcileVolumeBackup{
 		scheme:        scheme.Scheme,
 		client:        k8sClient,
 		config:        cfg,
 		snapClientset: snapClientset,
+		executor:      executor,
 	}
 
 	request := reconcile.Request{}
