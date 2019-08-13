@@ -19,11 +19,12 @@ func int32Pointer(n int32) *int32 {
 // What happens when you backup an application that has no volume
 func TestReconcile(t *testing.T) {
 	var (
-		name                 = "example-backup"
-		namespace            = "example"
-		applicationRef       = "example-application-to-backup"
-		replicas       int32 = 1
-		gvr                  = schema.GroupVersionResource{
+		name                  = "example-backup"
+		namespace             = "example"
+		applicationName       = "example-application-to-backup"
+		containerName         = "busybox"
+		replicas        int32 = 1
+		gvr                   = schema.GroupVersionResource{
 			Group:    "volumesnapshot",
 			Resource: "volumesnapshots",
 			Version:  "v1alpha1",
@@ -34,50 +35,50 @@ func TestReconcile(t *testing.T) {
 		{
 			name: "reconcile add - one container with one volume",
 			objs: []runtime.Object{
-				helpers.NewDeployment(namespace, applicationRef, &replicas),
-				helpers.NewPod(namespace, applicationRef, 1),
+				helpers.NewDeployment(namespace, applicationName, &replicas),
+				helpers.NewPod(namespace, applicationName, 1),
 				helpers.NewPersistentVolume("test-vol-0"),
 				helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
 			},
 			snapshotObjs: []runtime.Object{},
-			volumeBackup: helpers.NewVolumeBackup(namespace, name, applicationRef),
+			volumeBackup: helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
 			expectedActions: []core.Action{
 				core.NewCreateAction(gvr,
 					namespace,
-					helpers.NewVolumeSnapshot(namespace, applicationRef+"-data-0", "test-claim-0"),
+					helpers.NewVolumeSnapshot(namespace, applicationName+"-data-0", "test-claim-0"),
 				),
 			},
 		},
 		{
 			name: "reconcile add - one container that has multiple volumes",
 			objs: []runtime.Object{
-				helpers.NewDeployment(namespace, applicationRef, &replicas),
-				helpers.NewPod(namespace, applicationRef, 2),
+				helpers.NewDeployment(namespace, applicationName, &replicas),
+				helpers.NewPod(namespace, applicationName, 2),
 				helpers.NewPersistentVolume("test-vol-0"),
 				helpers.NewPersistentVolume("test-vol-1"),
 				helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
 				helpers.NewPersistentVolumeClaim(namespace, "test-claim-1", "test-vol-1"),
 			},
 			snapshotObjs: []runtime.Object{},
-			volumeBackup: helpers.NewVolumeBackup(namespace, name, applicationRef),
+			volumeBackup: helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
 			expectedActions: []core.Action{
 				core.NewCreateAction(
 					gvr,
 					namespace,
-					helpers.NewVolumeSnapshot(namespace, applicationRef+"-data-0", "test-claim-0"),
+					helpers.NewVolumeSnapshot(namespace, applicationName+"-data-0", "test-claim-0"),
 				),
 				core.NewCreateAction(
 					gvr,
 					namespace,
-					helpers.NewVolumeSnapshot(namespace, applicationRef+"-data-1", "test-claim-1"),
+					helpers.NewVolumeSnapshot(namespace, applicationName+"-data-1", "test-claim-1"),
 				),
 			},
 		},
 		{
 			name: "reconcile add - VolumeBackup object has not been created yet",
 			objs: []runtime.Object{
-				helpers.NewDeployment(namespace, applicationRef, &replicas),
-				helpers.NewPod(namespace, applicationRef, 1),
+				helpers.NewDeployment(namespace, applicationName, &replicas),
+				helpers.NewPod(namespace, applicationName, 1),
 				helpers.NewPersistentVolume("test-vol-0"),
 				helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
 			},
@@ -93,35 +94,35 @@ func TestReconcile(t *testing.T) {
 			name:            "reconcile add - can't find deployment",
 			objs:            []runtime.Object{},
 			snapshotObjs:    []runtime.Object{},
-			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationRef),
+			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
 			expectedActions: []core.Action{},
 			expectedResult:  reconcile.Result{},
 			expectedError: errors.NewNotFound(schema.GroupResource{
 				Group:    "apps",
 				Resource: "deployments",
-			}, applicationRef),
+			}, applicationName),
 		},
 		{
 			name: "reconcile add - no pods available - basically a no-op",
 			objs: []runtime.Object{
-				helpers.NewDeployment(namespace, applicationRef, &replicas),
+				helpers.NewDeployment(namespace, applicationName, &replicas),
 				helpers.NewPersistentVolume("test-vol-0"),
 				helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
 			},
 			snapshotObjs:    []runtime.Object{},
-			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationRef),
+			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
 			expectedActions: []core.Action{},
-			expectedResult:  reconcile.Result{},
+			expectedResult:  reconcile.Result{Requeue: true},
 		},
 		{
 			name: "reconcile add - volume does not exist",
 			objs: []runtime.Object{
-				helpers.NewDeployment(namespace, applicationRef, &replicas),
-				helpers.NewPod(namespace, applicationRef, 1),
+				helpers.NewDeployment(namespace, applicationName, &replicas),
+				helpers.NewPod(namespace, applicationName, 1),
 				helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
 			},
 			snapshotObjs:    []runtime.Object{},
-			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationRef),
+			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
 			expectedActions: []core.Action{},
 			expectedError: errors.NewNotFound(schema.GroupResource{
 				Group:    "",
@@ -131,12 +132,12 @@ func TestReconcile(t *testing.T) {
 		{
 			name: "reconcile add - volume claim does not exist",
 			objs: []runtime.Object{
-				helpers.NewDeployment(namespace, applicationRef, &replicas),
-				helpers.NewPod(namespace, applicationRef, 1),
+				helpers.NewDeployment(namespace, applicationName, &replicas),
+				helpers.NewPod(namespace, applicationName, 1),
 				helpers.NewPersistentVolume("test-vol-0"),
 			},
 			snapshotObjs:    []runtime.Object{},
-			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationRef),
+			volumeBackup:    helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
 			expectedActions: []core.Action{},
 			expectedError: errors.NewNotFound(schema.GroupResource{
 				Group:    "",

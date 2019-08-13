@@ -13,21 +13,21 @@ import (
 )
 
 var (
-	name                 = "example-backup"
-	namespace            = "example"
-	applicationRef       = "example-application-to-backup"
-	storageclass         = "mock-csi-storageclass"
-	replicas       int32 = 1
-	apiVersion           = "backups.example.com/v1alpha1"
-	kind                 = "VolumeBackup"
-	gvr                  = schema.GroupVersionResource{
+	name                  = "example-backup"
+	namespace             = "example"
+	applicationName       = "example-application-to-backup"
+	storageclass          = "mock-csi-storageclass"
+	replicas        int32 = 1
+	apiVersion            = "backups.example.com/v1alpha1"
+	kind                  = "VolumeBackup"
+	gvr                   = schema.GroupVersionResource{
 		Group:    "volumesnapshot",
 		Resource: "volumesnapshots",
 		Version:  "v1alpha1",
 	}
 )
 
-func NewVolumeBackup(namespace, volumeBackupName, applicationRef string) *volumebackupv1alpha1.VolumeBackup {
+func NewVolumeBackup(namespace, volumeBackupName, applicationName, containerName, volumeName string) *volumebackupv1alpha1.VolumeBackup {
 	return &volumebackupv1alpha1.VolumeBackup{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: volumebackupv1alpha1.SchemeGroupVersion.String(),
@@ -38,7 +38,9 @@ func NewVolumeBackup(namespace, volumeBackupName, applicationRef string) *volume
 			Namespace: namespace,
 		},
 		Spec: volumebackupv1alpha1.VolumeBackupSpec{
-			ApplicationRef: applicationRef,
+			ApplicationName: applicationName,
+			VolumeName:      volumeName,
+			ContainerName:   containerName,
 		},
 	}
 }
@@ -150,7 +152,7 @@ func NewPod(namespace, name string, volumeCount int) *corev1.Pod {
 	return &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{
-				Name:    name,
+				Name:    "busybox",
 				Image:   "busybox",
 				Command: []string{"echo hello"},
 			}},
@@ -178,6 +180,15 @@ func NewPod(namespace, name string, volumeCount int) *corev1.Pod {
 				"backups.example.com.post-hook": "echo unfreeze",
 			},
 		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:  "busybox",
+					Ready: true,
+				},
+			},
+		},
 	}
 }
 
@@ -197,7 +208,7 @@ func NewPodWithCommand(namespace, name, command string, volumeCount int) *corev1
 	return &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{
-				Name:    name,
+				Name:    "busybox",
 				Image:   "busybox",
 				Command: []string{command},
 			}},

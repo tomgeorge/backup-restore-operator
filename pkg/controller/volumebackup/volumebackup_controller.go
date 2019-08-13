@@ -2,6 +2,7 @@ package volumebackup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
@@ -10,7 +11,7 @@ import (
 	"github.com/tomgeorge/backup-restore-operator/pkg/util/executor"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	kubeErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -101,7 +102,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	instance := &backupsv1alpha1.VolumeBackup{}
 	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if kubeErrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
 			// Return and don't requeue
@@ -110,12 +111,12 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
-	reqLogger.Info(fmt.Sprintf("Deployment to grab hook from is %v in namespace %v", instance.Spec.ApplicationRef, instance.ObjectMeta.Namespace))
+	reqLogger.Info(fmt.Sprintf("Deployment to grab hook from is %v in namespace %v", instance.Spec.ApplicationName, instance.ObjectMeta.Namespace))
 
 	deployment := &appsv1.Deployment{}
 	err = r.client.Get(context.TODO(), client.ObjectKey{
 		Namespace: instance.ObjectMeta.Namespace,
-		Name:      instance.Spec.ApplicationRef,
+		Name:      instance.Spec.ApplicationName,
 	}, deployment)
 
 	if err != nil {
@@ -143,21 +144,58 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		return reconcile.Result{}, err
 	}
 
-	for _, pod := range pods.Items {
-		if err := r.freezePod(&pod); err != nil {
-			reqLogger.Error(err, "Error freezing pod", "Pod.Name", pod.Name)
-			return reconcile.Result{}, err
+	if len(pods.Items) == 0 {
+		reqLogger.Info("Deployment to back up has no replicas", "deployment.Name", deployment.Name)
+		return reconcile.Result{Requeue: true}, nil
+	}
+
+	// Use the first pod in the list to do the freeze
+	podToExec := pods.Items[0]
+	reqLogger.Info("got a pod", "Pod.Name", podToExec.Name)
+	if podToExec.Status.Phase != corev1.PodRunning {
+		reqLogger.Info("Pod is not in the running phase", "Pod.Name", podToExec.Name)
+		return reconcile.Result{Requeue: true}, nil
+	}
+
+	// Get the container referenced by the backup request
+	var containerToExec corev1.Container
+	var containerStatus corev1.ContainerStatus
+	for idx, container := range podToExec.Spec.Containers {
+		if container.Name == instance.Spec.ContainerName {
+			containerToExec = container
+			containerStatus = podToExec.Status.ContainerStatuses[idx]
 		}
-		if err = r.issueBackup(instance, &pod); err != nil {
+	}
+
+	// If we can't match a container in the deployment to one specified by the VolumeBackupSpec, return an error
+	if &containerToExec == nil || &containerStatus == nil {
+		err = errors.New("Could not locate container to exec")
+		reqLogger.Error(err, "Could not locate container to run exec", "Container.Name", instance.Spec.ContainerName)
+		return reconcile.Result{}, err
+	}
+
+	if !containerStatus.Ready {
+		reqLogger.Info("Container is not yet ready", "Container.Name", instance.Spec.ContainerName)
+		return reconcile.Result{Requeue: true}, nil
+	}
+
+	if err := r.freeze(&podToExec); err != nil {
+		reqLogger.Error(err, "Error freezing pod", "Pod.Name", podToExec.Name)
+		return reconcile.Result{}, err
+	}
+	if err = r.issueBackup(instance, &podToExec); err != nil {
+		if !kubeErrors.IsAlreadyExists(err) {
 			reqLogger.Error(err, "Error creating volumesnapshot")
 			return reconcile.Result{}, err
+		} else {
+			reqLogger.Info("Backup already exists")
 		}
-		// TODO: Do we want to defer unfreezing the pod? can we even defer it if we don't know the pod beforehand? Could probably make another function
-		// TODO: Check VolumeSnapshot.Status.ReadyToUse before unfreezing
-		if err = r.unfreezePod(&pod); err != nil {
-			reqLogger.Error(err, "Error un-freezing pod", "Pod.Name", pod.Name)
-			return reconcile.Result{}, err
-		}
+	}
+	// TODO: Do we want to defer unfreezing the pod? can we even defer it if we don't know the pod beforehand? Could probably make another function
+	// TODO: Check VolumeSnapshot.Status.ReadyToUse before unfreezing
+	if err = r.unfreeze(&podToExec); err != nil {
+		reqLogger.Error(err, "Error un-freezing pod", "Pod.Name", podToExec.Name)
+		return reconcile.Result{}, err
 	}
 
 	return reconcile.Result{}, nil
@@ -239,7 +277,7 @@ func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, vol
 	return snapshot, nil
 }
 
-func (r *ReconcileVolumeBackup) unfreezePod(pod *corev1.Pod) error {
+func (r *ReconcileVolumeBackup) unfreeze(pod *corev1.Pod) error {
 	postHook := pod.Annotations["backups.example.com.post-hook"]
 	command := []string{"/bin/sh", "-i", "-c"}
 	command = append(command, postHook)
@@ -247,7 +285,7 @@ func (r *ReconcileVolumeBackup) unfreezePod(pod *corev1.Pod) error {
 	return err
 }
 
-func (r *ReconcileVolumeBackup) freezePod(pod *corev1.Pod) error {
+func (r *ReconcileVolumeBackup) freeze(pod *corev1.Pod) error {
 	preHook := pod.Annotations["backups.example.com.pre-hook"]
 	command := []string{"/bin/sh", "-i", "-c"}
 	command = append(command, preHook)
