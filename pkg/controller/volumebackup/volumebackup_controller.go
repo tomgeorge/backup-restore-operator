@@ -215,19 +215,6 @@ func (r *ReconcileVolumeBackup) issueBackup(instance *backupsv1alpha1.VolumeBack
 	return nil
 }
 
-func (r *ReconcileVolumeBackup) requestCreate(snapshot *v1alpha1.VolumeSnapshot, instance *backupsv1alpha1.VolumeBackup) error {
-	if err := controllerutil.SetControllerReference(instance, snapshot, r.scheme); err != nil {
-		log.Error(err, "Unable to set owner reference of %v", snapshot.Name)
-		return err
-	}
-	_, err := r.snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Create(snapshot)
-	if err != nil {
-		log.Error(err, "Error creating VolumeSnapshot")
-		return err
-	}
-	return nil
-}
-
 func (r *ReconcileVolumeBackup) createVolumeSnapshotsFromPod(pod *corev1.Pod) ([]v1alpha1.VolumeSnapshot, error) {
 	snapshots := []v1alpha1.VolumeSnapshot{}
 	for _, volume := range pod.Spec.Volumes {
@@ -275,6 +262,19 @@ func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, vol
 		},
 	}
 	return snapshot, nil
+}
+
+func (r *ReconcileVolumeBackup) requestCreate(snapshot *v1alpha1.VolumeSnapshot, instance *backupsv1alpha1.VolumeBackup) error {
+	if err := controllerutil.SetControllerReference(instance, snapshot, r.scheme); err != nil {
+		log.Error(err, "Unable to set owner reference of %v", snapshot.Name)
+		return err
+	}
+	_, err := r.snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Create(snapshot)
+	if err != nil {
+		log.Error(err, "Error creating VolumeSnapshot")
+		return err
+	}
+	return nil
 }
 
 func (r *ReconcileVolumeBackup) unfreeze(pod *corev1.Pod) error {
