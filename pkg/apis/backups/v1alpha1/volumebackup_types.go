@@ -24,10 +24,66 @@ type VolumeBackupStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	// Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html
+	VolumeBackupConditions []VolumeBackupCondition `json:"volumeBackupCondition"`
 }
 
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type VolumeBackupCondition struct {
+	// Type is the type of the condition.
+	// More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#pod-conditions
+	Type VolumeBackupConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=VolumeBackupConditionType"`
+	// Status is the status of the condition.
+	// Can be True, False, Unknown.
+	// More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#pod-conditions
+	// +optional
+	Status ConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=ConditionStatus"`
+	// Last time we probed the condition.
+	// +optional
+	// LastProbeTime metav1.Time `json:"lastProbeTime,omitempty" protobuf:"bytes,3,opt,name=lastProbeTime"`
+	// Last time the condition transitioned from one status to another.
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty" protobuf:"bytes,4,opt,name=lastTransitionTime"`
+	// Unique, one-word, CamelCase reason for the condition's last transition.
+	// +optional
+	Reason string `json:"reason,omitempty" protobuf:"bytes,5,opt,name=reason"`
+	// Human-readable message indicating details about last transition.
+	// +optional
+	Message string `json:"message,omitempty" protobuf:"bytes,6,opt,name=message"`
+}
+
+///
+// Status:
+//   Conditions:
+//   [
+//     [ PodFrozen, True]
+//     [ SnapshotIssued, True]
+//     [ SnapshotCreated, False]?
+const (
+	PodFrozen         VolumeBackupConditionType = "PodFrozen"
+	SnapshotIssued    VolumeBackupConditionType = "SnapshotIssued"
+	SnapshotCreated   VolumeBackupConditionType = "SnapshotCreated"
+	PodUnfrozen       VolumeBackupConditionType = "PodUnfrozen"
+	SnapshotReady     VolumeBackupConditionType = "SnapshotReady"
+	SnapshotUploading VolumeBackupConditionType = "SnapshotUploading"
+	SnapshotUploaded  VolumeBackupConditionType = "SnapshotUploaded"
+)
+
+// VolumeBackupConditionType is a valid value for VolumeBackupCondition.Type
+type VolumeBackupConditionType string
+
+type ConditionStatus string
+
+// These are valid condition statuses. "ConditionTrue" means a resource is in the condition.
+// "ConditionFalse" means a resource is not in the condition. "ConditionUnknown" means kubernetes
+// can't decide if a resource is in the condition or not. In the future, we could add other
+// intermediate conditions, e.g. ConditionDegraded.
+const (
+	ConditionTrue    ConditionStatus = "True"
+	ConditionFalse   ConditionStatus = "False"
+	ConditionUnknown ConditionStatus = "Unknown"
+)
+
 // VolumeBackup is the Schema for the volumebackups API
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:openapi-gen=true
 // +kubebuilder:subresource:status
 type VolumeBackup struct {

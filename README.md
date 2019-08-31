@@ -172,3 +172,17 @@ Optional: Delete the old PVC
 
 
 Subsequent deployments of an application that has been restored could remove the previously restored data
+
+
+
+### Pairing Notes
+
+- Change `ApplicationName` to just a pod selector?  That way you don't have to care what kind of higher-level application you are backing up
+- Document that we are performing the backup on pod 0 of the returned list of pods
+- Need to check if we have frozen/unfrozen the Pod before we perform the freeze.  Track this in the Status of the VolumeBackup
+- PodExecutor assumes the zeroth container, should pass in the container we want
+- Have to update the status of the VolumeBackup saying that it has been frozen, and return
+- Before we issue a backup, we have to check whether or not a backup has been performed (if the snapshot exists)
+- Rename `issueBackup` to `issueSnapshot`
+- Add a new field to the VolumeBackup specifying the `VolumeSnapshotClass`
+- 

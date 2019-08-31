@@ -28,8 +28,57 @@ spec:
         metadata:
           type: object
         spec:
+          properties:
+            applicationName:
+              description: 'INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+                Important: Run "operator-sdk generate k8s" to regenerate code after
+                modifying this file Add custom validation using kubebuilder tags:
+                https://book.kubebuilder.io/beyond_basics/generating_crd.html'
+              type: string
+            containerName:
+              type: string
+            volumeName:
+              type: string
+          required:
+          - applicationName
+          - volumeName
+          - containerName
           type: object
         status:
+          properties:
+            volumeBackupCondition:
+              description: 'INSERT ADDITIONAL STATUS FIELD - define observed state
+                of cluster Important: Run "operator-sdk generate k8s" to regenerate
+                code after modifying this file Add custom validation using kubebuilder
+                tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html'
+              properties:
+                lastTransitionTime:
+                  description: Last time we probed the condition. LastProbeTime metav1.Time
+                    `json:"lastProbeTime,omitempty" protobuf:"bytes,3,opt,name=lastProbeTime"`
+                    Last time the condition transitioned from one status to another.
+                  format: date-time
+                  type: string
+                message:
+                  description: Human-readable message indicating details about last
+                    transition.
+                  type: string
+                reason:
+                  description: Unique, one-word, CamelCase reason for the condition's
+                    last transition.
+                  type: string
+                status:
+                  description: 'Status is the status of the condition. Can be True,
+                    False, Unknown. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#pod-conditions'
+                  type: string
+                type:
+                  description: 'Type is the type of the condition. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#pod-conditions'
+                  type: string
+              required:
+              - type
+              - status
+              type: object
+          required:
+          - volumeBackupCondition
           type: object
   version: v1alpha1
   versions:

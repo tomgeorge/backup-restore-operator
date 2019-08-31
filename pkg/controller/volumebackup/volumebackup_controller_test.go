@@ -1,14 +1,16 @@
 package volumebackup
 
 import (
-	"k8s.io/apimachinery/pkg/api/errors"
 	"testing"
 
-	test_helpers "github.com/tomgeorge/backup-restore-operator/pkg/controller/test/helpers"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	backupsv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
+	testHelpers "github.com/tomgeorge/backup-restore-operator/pkg/controller/test/helpers"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	core "k8s.io/client-go/testing"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 func int32Pointer(n int32) *int32 {
@@ -22,6 +24,8 @@ func TestReconcile(t *testing.T) {
 		name                  = "example-backup"
 		namespace             = "example"
 		applicationName       = "example-application-to-backup"
+		volumeName            = "test-vol-0"
+		claimName             = "test-claim-0"
 		containerName         = "busybox"
 		replicas        int32 = 1
 		gvr                   = schema.GroupVersionResource{
@@ -29,121 +33,171 @@ func TestReconcile(t *testing.T) {
 			Resource: "volumesnapshots",
 			Version:  "v1alpha1",
 		}
+		statusEmpty     = &backupsv1alpha1.VolumeBackupStatus{}
+		statusPodFrozen = &backupsv1alpha1.VolumeBackupStatus{
+			VolumeBackupConditions: []backupsv1alpha1.VolumeBackupCondition{
+				{
+					Type:   backupsv1alpha1.PodFrozen,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+			},
+		}
 	)
 
 	cases := []testCase{
 		{
-			name: "reconcile add - one container with one volume",
+			name: "no phase - should identify that the backup flow has not started, freeze the pod, and move the backup into the PodFrozen phase",
 			objs: []runtime.Object{
-				test_helpers.NewDeployment(namespace, applicationName, &replicas),
-				test_helpers.NewPod(namespace, applicationName, 1),
-				test_helpers.NewPersistentVolume("test-vol-0"),
-				test_helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
+				testHelpers.NewDeployment(namespace, applicationName, &replicas),
+				testHelpers.NewPod(namespace, applicationName, 1),
+				testHelpers.NewPersistentVolume(volumeName),
+				testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
 			},
 			snapshotObjs: []runtime.Object{},
-			volumeBackup: test_helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
+			volumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusEmpty),
 			expectedActions: []core.Action{
-				core.NewCreateAction(gvr,
+				core.NewGetAction(gvr,
 					namespace,
-					test_helpers.NewVolumeSnapshot(namespace, applicationName+"-data-0", "test-claim-0"),
-				),
+					applicationName+"-"+volumeName),
 			},
+			expectedResult:       reconcile.Result{},
+			expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusPodFrozen),
 		},
 		{
-			name: "reconcile add - one container that has multiple volumes",
+			name: "no phase - should not freeze if things are missing",
 			objs: []runtime.Object{
-				test_helpers.NewDeployment(namespace, applicationName, &replicas),
-				test_helpers.NewPod(namespace, applicationName, 2),
-				test_helpers.NewPersistentVolume("test-vol-0"),
-				test_helpers.NewPersistentVolume("test-vol-1"),
-				test_helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
-				test_helpers.NewPersistentVolumeClaim(namespace, "test-claim-1", "test-vol-1"),
+				testHelpers.NewPod(namespace, applicationName, 1),
+				testHelpers.NewPersistentVolume(volumeName),
+				testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
 			},
-			snapshotObjs: []runtime.Object{},
-			volumeBackup: test_helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
-			expectedActions: []core.Action{
-				core.NewCreateAction(
-					gvr,
-					namespace,
-					test_helpers.NewVolumeSnapshot(namespace, applicationName+"-data-0", "test-claim-0"),
-				),
-				core.NewCreateAction(
-					gvr,
-					namespace,
-					test_helpers.NewVolumeSnapshot(namespace, applicationName+"-data-1", "test-claim-1"),
-				),
-			},
-		},
-		{
-			name: "reconcile add - VolumeBackup object has not been created yet",
-			objs: []runtime.Object{
-				test_helpers.NewDeployment(namespace, applicationName, &replicas),
-				test_helpers.NewPod(namespace, applicationName, 1),
-				test_helpers.NewPersistentVolume("test-vol-0"),
-				test_helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
-			},
-			snapshotObjs:    []runtime.Object{},
-			expectedActions: []core.Action{},
-			expectedResult: reconcile.Result{
-				Requeue:      false,
-				RequeueAfter: 0,
-			},
-			expectedError: nil,
-		},
-		{
-			name:            "reconcile add - can't find deployment",
-			objs:            []runtime.Object{},
-			snapshotObjs:    []runtime.Object{},
-			volumeBackup:    test_helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
-			expectedActions: []core.Action{},
-			expectedResult:  reconcile.Result{},
+			snapshotObjs:         []runtime.Object{},
+			volumeBackup:         testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusEmpty),
+			expectedActions:      []core.Action{},
+			expectedResult:       reconcile.Result{},
+			expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusEmpty),
 			expectedError: errors.NewNotFound(schema.GroupResource{
 				Group:    "apps",
 				Resource: "deployments",
 			}, applicationName),
 		},
-		{
-			name: "reconcile add - no pods available - basically a no-op",
-			objs: []runtime.Object{
-				test_helpers.NewDeployment(namespace, applicationName, &replicas),
-				test_helpers.NewPersistentVolume("test-vol-0"),
-				test_helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
-			},
-			snapshotObjs:    []runtime.Object{},
-			volumeBackup:    test_helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
-			expectedActions: []core.Action{},
-			expectedResult:  reconcile.Result{Requeue: true},
-		},
-		{
-			name: "reconcile add - volume does not exist",
-			objs: []runtime.Object{
-				test_helpers.NewDeployment(namespace, applicationName, &replicas),
-				test_helpers.NewPod(namespace, applicationName, 1),
-				test_helpers.NewPersistentVolumeClaim(namespace, "test-claim-0", "test-vol-0"),
-			},
-			snapshotObjs:    []runtime.Object{},
-			volumeBackup:    test_helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
-			expectedActions: []core.Action{},
-			expectedError: errors.NewNotFound(schema.GroupResource{
-				Group:    "",
-				Resource: "persistentvolumes",
-			}, "test-vol-0"),
-		},
-		{
-			name: "reconcile add - volume claim does not exist",
-			objs: []runtime.Object{
-				test_helpers.NewDeployment(namespace, applicationName, &replicas),
-				test_helpers.NewPod(namespace, applicationName, 1),
-				test_helpers.NewPersistentVolume("test-vol-0"),
-			},
-			snapshotObjs:    []runtime.Object{},
-			volumeBackup:    test_helpers.NewVolumeBackup(namespace, name, applicationName, containerName, "test-vol-0"),
-			expectedActions: []core.Action{},
-			expectedError: errors.NewNotFound(schema.GroupResource{
-				Group:    "",
-				Resource: "persistentvolumeclaims",
-			}, "test-claim-0"),
-		},
+		// {
+		// 	name: "reconcile add - VolumeBackup object has not been created yet",
+		// 	objs: []runtime.Object{
+		// 		testHelpers.NewDeployment(namespace, applicationName, &replicas),
+		// 		testHelpers.NewPod(namespace, applicationName, 1),
+		// 		testHelpers.NewPersistentVolume(volumeName),
+		// 		testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
+		// 	},
+		// 	snapshotObjs:         []runtime.Object{},
+		// 	expectedActions:      []core.Action{},
+		// 	expectedVolumeBackup: nil,
+		// 	expectedResult: reconcile.Result{
+		// 		Requeue:      false,
+		// 		RequeueAfter: 0,
+		// 	},
+		// 	expectedError: nil,
+		// },
+		// {
+		// 	name:            "reconcile add - can't find deployment",
+		// 	objs:            []runtime.Object{},
+		// 	snapshotObjs:    []runtime.Object{},
+		// 	volumeBackup:    testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName),
+		// 	expectedActions: []core.Action{},
+		// 	expectedResult:  reconcile.Result{},
+		// 	expectedError: errors.NewNotFound(schema.GroupResource{
+		// 		Group:    "apps",
+		// 		Resource: "deployments",
+		// 	}, applicationName),
+		// 	expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName),
+		// },
+		// {
+		// 	name: "reconcile add - no pods available - basically a no-op",
+		// 	objs: []runtime.Object{
+		// 		testHelpers.NewDeployment(namespace, applicationName, &replicas),
+		// 		testHelpers.NewPersistentVolume(volumeName),
+		// 		testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
+		// 	},
+		// 	snapshotObjs:    []runtime.Object{},
+		// 	volumeBackup:    testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName),
+		// 	expectedActions: []core.Action{},
+		// 	expectedResult:  reconcile.Result{Requeue: true},
+		// },
+		// {
+		// 	name: "No phase - reconcile new add - volume does not exist",
+		// 	objs: []runtime.Object{
+		// 		testHelpers.NewDeployment(namespace, applicationName, &replicas),
+		// 		testHelpers.NewPod(namespace, applicationName, 1),
+		// 		testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
+		// 	},
+		// 	snapshotObjs: []runtime.Object{},
+		// 	volumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName),
+		// 	expectedVolumeBackup: &backupsv1alpha1.VolumeBackup{
+		// 		TypeMeta: v1.TypeMeta{
+		// 			Kind:       "VolumeBackup",
+		// 			APIVersion: "v1alpha1",
+		// 		},
+		// 		ObjectMeta: v1.ObjectMeta{
+		// 			Name:      name,
+		// 			Namespace: namespace,
+		// 		},
+		// 		Spec: backupsv1alpha1.VolumeBackupSpec{
+		// 			ApplicationName: applicationName,
+		// 			VolumeName:      volumeName,
+		// 			ContainerName:   containerName,
+		// 		},
+		// 		Status: backupsv1alpha1.VolumeBackupStatus{
+		// 			VolumeBackupConditions: []backupsv1alpha1.VolumeBackupCondition{
+		// 				{
+		// 					Type:   backupsv1alpha1.PodFrozen,
+		// 					Status: backupsv1alpha1.ConditionTrue,
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedActions: []core.Action{
+		// 		core.NewGetAction(gvr,
+		// 			namespace,
+		// 			applicationName+"-"+volumeName),
+		// 	},
+		// 	expectedError: nil,
+		// },
+		// {
+		// 	name: "reconcile add - volume claim does not exist",
+		// 	objs: []runtime.Object{
+		// 		testHelpers.NewDeployment(namespace, applicationName, &replicas),
+		// 		testHelpers.NewPod(namespace, applicationName, 1),
+		// 		testHelpers.NewPersistentVolume(volumeName),
+		// 	},
+		// 	snapshotObjs: []runtime.Object{},
+		// 	volumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName),
+		// 	expectedActions: []core.Action{
+		// 		core.NewGetAction(gvr, namespace, applicationName+"-"+volumeName),
+		// 	},
+		// 	expectedVolumeBackup: &backupsv1alpha1.VolumeBackup{
+		// 		TypeMeta: v1.TypeMeta{
+		// 			Kind:       "VolumeBackup",
+		// 			APIVersion: "v1alpha1",
+		// 		},
+		// 		ObjectMeta: v1.ObjectMeta{
+		// 			Name:      name,
+		// 			Namespace: namespace,
+		// 		},
+		// 		Spec: backupsv1alpha1.VolumeBackupSpec{
+		// 			ApplicationName: applicationName,
+		// 			VolumeName:      volumeName,
+		// 			ContainerName:   containerName,
+		// 		},
+		// 		Status: backupsv1alpha1.VolumeBackupStatus{
+		// 			VolumeBackupConditions: []backupsv1alpha1.VolumeBackupCondition{
+		// 				{
+		// 					Type:   backupsv1alpha1.PodFrozen,
+		// 					Status: backupsv1alpha1.ConditionTrue,
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedError: nil,
+		// },
 	}
 
 	for _, testCase := range cases {

@@ -6,3 +6,4 @@ metadata:
 spec:
   applicationName: mysql
   containerName: mysql
+  volumeName: mysql

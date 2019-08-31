@@ -78,12 +78,7 @@ func (executor *RemotePodExecutor) DoRemoteExec(pod *corev1.Pod, command []strin
 	var exitCode int
 	if err == nil {
 		exitCode = 0
-		// fmt.Println(stdOut.String())
-		// fmt.Println(stdErr.String())
 	} else {
-		// log.Error(nil, fmt.Sprintf("exit code is %d", exitCode))
-		// fmt.Println(stdOut.String())
-		// fmt.Println(stdErr.String())
 		return -1, err
 	}
 

@@ -9,6 +9,7 @@ import (
 	"github.com/kr/pretty"
 	fakeSnapshotClient "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned/fake"
 	snapshotscheme "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned/scheme"
+	backupsv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
 	volumebackupv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
 	"github.com/tomgeorge/backup-restore-operator/pkg/util/executor"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -42,6 +43,9 @@ type testCase struct {
 	// The expected actions (Create/Update/Delete) that the snapshot client is supposed to perform
 	expectedActions []core.Action
 
+	// The VolumeBackup expected after a reconcile in a given state
+	expectedVolumeBackup *backupsv1alpha1.VolumeBackup
+
 	// The expected reconcile result
 	expectedResult reconcile.Result
 
@@ -58,13 +62,13 @@ type testCase struct {
 func runInTestHarness(t *testing.T, test testCase) {
 	snapshotscheme.AddToScheme(scheme.Scheme)
 	volumebackupv1alpha1.AddToScheme(scheme.Scheme)
+	backupsv1alpha1.AddToScheme(scheme.Scheme)
 	t.Logf("Running test case %s", test.name)
 
 	k8sClient := fakeClient.NewFakeClientWithScheme(scheme.Scheme, test.objs...)
 	snapClientset := fakeSnapshotClient.NewSimpleClientset(test.snapshotObjs...)
 	cfg := &rest.Config{}
 	executor := executor.CreateNewFakePodExecutor()
-
 	reconcileVolumeBackup := &ReconcileVolumeBackup{
 		scheme:        scheme.Scheme,
 		client:        k8sClient,
@@ -78,7 +82,6 @@ func runInTestHarness(t *testing.T, test testCase) {
 	// In some cases, you will want to test Reconciliation without a VolumeBackup having been
 	// created
 	if test.volumeBackup != nil {
-		fmt.Printf("This test does not have a volumebackup in the set-up")
 		err := k8sClient.Create(context.TODO(), test.volumeBackup)
 		if err != nil {
 			t.Errorf("Error creating VolumeBackup: %v", err)
@@ -90,6 +93,7 @@ func runInTestHarness(t *testing.T, test testCase) {
 		}
 
 	} else {
+		fmt.Printf("This test does not have a volumebackup in the set-up")
 		request.NamespacedName = types.NamespacedName{
 			Namespace: "default",
 			Name:      "vb",
@@ -105,6 +109,7 @@ func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBa
 		t.Errorf("Fatal - test %v - could not assert fakeSnapshotClient.Clientset type on snapshot client", testcase.name)
 	}
 
+	// Fail if the expected actions are not the same as the actual actions in the snapshot clientset
 	if len(client.Actions()) != len(testcase.expectedActions) {
 		t.Errorf("Error - test %v - expected %v actions received by client but was %v", testcase.name, len(testcase.expectedActions), len(client.Actions()))
 		t.Errorf("%v", pretty.Diff(testcase.expectedActions, client.Actions()))
@@ -118,13 +123,35 @@ func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBa
 		}
 	}
 
+	// Fail if the expected error does not match the actual error
 	if !reflect.DeepEqual(err, testcase.expectedError) {
 		t.Errorf("Error - test %v - expected error but got", testcase.name)
 		t.Errorf("%v", pretty.Diff(err, testcase.expectedError))
 	}
 
+	// Fail if the expected reconcile.Result is not the same as the actual reconcile.Result
 	if !reflect.DeepEqual(result, testcase.expectedResult) {
 		t.Errorf("Error - test %v - result objects do not match", testcase.name)
 		t.Errorf("%v", pretty.Diff(result, testcase.expectedResult))
+	}
+
+	// Request the VolumeBackup object from the client, and fail if the status is not the same as the expected volumebackup
+	if testcase.expectedVolumeBackup != nil {
+		backup := &backupsv1alpha1.VolumeBackup{}
+		getErr := reconcileVolumeBackup.client.Get(context.TODO(), types.NamespacedName{
+			Namespace: testcase.expectedVolumeBackup.Namespace,
+			Name:      testcase.expectedVolumeBackup.Name,
+		}, backup)
+		if getErr != nil {
+			t.Errorf("Error - test %v - could not get volumebackup", testcase.name)
+		}
+
+		for i, condition := range backup.Status.VolumeBackupConditions {
+			if !(testcase.expectedVolumeBackup.Status.VolumeBackupConditions[i].Type == condition.Type &&
+				testcase.expectedVolumeBackup.Status.VolumeBackupConditions[i].Status == condition.Status) {
+				t.Errorf("Error - test %v - expected backup status does not match actual", testcase.name)
+				t.Errorf("%v", pretty.Diff(testcase.expectedVolumeBackup.Status.VolumeBackupConditions, backup.Status.VolumeBackupConditions))
+			}
+		}
 	}
 }

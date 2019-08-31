@@ -27,7 +27,7 @@ var (
 	}
 )
 
-func NewVolumeBackup(namespace, volumeBackupName, applicationName, containerName, volumeName string) *volumebackupv1alpha1.VolumeBackup {
+func NewVolumeBackup(namespace, volumeBackupName, applicationName, containerName, volumeName string, status *volumebackupv1alpha1.VolumeBackupStatus) *volumebackupv1alpha1.VolumeBackup {
 	return &volumebackupv1alpha1.VolumeBackup{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: volumebackupv1alpha1.SchemeGroupVersion.String(),
@@ -42,6 +42,7 @@ func NewVolumeBackup(namespace, volumeBackupName, applicationName, containerName
 			VolumeName:      volumeName,
 			ContainerName:   containerName,
 		},
+		Status: *status,
 	}
 }
 

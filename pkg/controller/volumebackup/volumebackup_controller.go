@@ -113,6 +113,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	}
 	reqLogger.Info(fmt.Sprintf("Deployment to grab hook from is %v in namespace %v", instance.Spec.ApplicationName, instance.ObjectMeta.Namespace))
 
+	// TODO: Change ApplicationName to just a pod selector
 	deployment := &appsv1.Deployment{}
 	err = r.client.Get(context.TODO(), client.ObjectKey{
 		Namespace: instance.ObjectMeta.Namespace,
@@ -150,6 +151,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	// Use the first pod in the list to do the freeze
+	// TODO: Document that we are performing the backup on pod 0 of the returned list of pods
 	podToExec := pods.Items[0]
 	reqLogger.Info("got a pod", "Pod.Name", podToExec.Name)
 	if podToExec.Status.Phase != corev1.PodRunning {
@@ -179,24 +181,68 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		return reconcile.Result{Requeue: true}, nil
 	}
 
-	if err := r.freeze(&podToExec); err != nil {
-		reqLogger.Error(err, "Error freezing pod", "Pod.Name", podToExec.Name)
-		return reconcile.Result{}, err
-	}
-	if err = r.issueBackup(instance, &podToExec); err != nil {
-		if !kubeErrors.IsAlreadyExists(err) {
-			reqLogger.Error(err, "Error creating volumesnapshot")
-			return reconcile.Result{}, err
-		} else {
-			reqLogger.Info("Backup already exists")
+	// TODO:  Need to check if we have frozen the Pod before we perform the freeze.  Track this in the status of the VolumeBackup
+	// PodFrozen, SnapshotIssued, SnapshotCreated, PodUnfrozen, SnapshotReady, SnapshotUploading, SnapshotUploaded
+	if !checkVolumeBackupStatus(backupsv1alpha1.PodFrozen, instance) {
+		_, err := r.snapClientset.
+			VolumesnapshotV1alpha1().
+			VolumeSnapshots(instance.Namespace).
+			Get(fmt.Sprintf("%v-%v", instance.Spec.ApplicationName, instance.Spec.VolumeName), metav1.GetOptions{})
+
+		// If we can't find the snapshot, we can freeze and update the status
+		if err != nil {
+			if kubeErrors.IsNotFound(err) {
+				if err := r.freeze(&podToExec); err != nil {
+					reqLogger.Error(err, "Error freezing pod", "Pod.Name", podToExec.Name)
+					updateStatus(backupsv1alpha1.PodFrozen, backupsv1alpha1.ConditionFalse, "", err.Error(), instance)
+					updateErr := r.client.Status().Update(context.TODO(), instance)
+					if updateErr != nil {
+						reqLogger.Error(updateErr, "Unable to update the status of VolumeBackup", "Name", instance.Name)
+						return reconcile.Result{}, updateErr
+					}
+					return reconcile.Result{}, err
+				}
+				updateStatus(backupsv1alpha1.PodFrozen, backupsv1alpha1.ConditionTrue, "", fmt.Sprintf("Froze Pod %v", podToExec), instance)
+				reqLogger.Info("Updating status", "Name", instance.Name)
+				updateerr := r.client.Status().Update(context.TODO(), instance)
+				if updateerr != nil {
+					reqLogger.Error(updateerr, "Unable to update the status of VolumeBackup", "Name", instance.Name)
+					return reconcile.Result{}, err
+				}
+
+				// VolumeBackup has been updated with the frozen status, so return
+				return reconcile.Result{}, nil
+			}
 		}
 	}
+
+	if !checkVolumeBackupStatus(backupsv1alpha1.SnapshotIssued, instance) {
+		// TODO: Update the status of the VolumeBackup saying that a snapshot has been issued, then return
+		// TODO: Rename to issueSnapshot
+		if err = r.issueBackup(instance, &podToExec); err != nil {
+			if !kubeErrors.IsAlreadyExists(err) {
+				reqLogger.Error(err, "Error creating volumesnapshot")
+				return reconcile.Result{}, err
+			} else {
+				reqLogger.Info("Backup already exists")
+			}
+		}
+	}
+
 	// TODO: Do we want to defer unfreezing the pod? can we even defer it if we don't know the pod beforehand? Could probably make another function
-	// TODO: Check VolumeSnapshot.Status.ReadyToUse before unfreezing
+	// TODO: Check VolumeSnapshot.Status Creation date before unfreezing
+	// TODO: Check if the pod is unfrozen before unfreezing.  If the creation date exists, and the pod is still frozen, then unfreeze
 	if err = r.unfreeze(&podToExec); err != nil {
 		reqLogger.Error(err, "Error un-freezing pod", "Pod.Name", podToExec.Name)
 		return reconcile.Result{}, err
 	}
+
+	// TODO: update the status of the VolumeBackup, that the pod was unfrozen and return
+	// TODO: check if the VolumeSnapshot is ready to use
+
+	// TODO: Once the VolumeSnapshot is ready to use, upload it to an object store
+	// - Create a PVC from the snapshot
+	// - Create a `Job` that mounts the new PVC and does the upload
 
 	return reconcile.Result{}, nil
 }
@@ -257,7 +303,7 @@ func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, vol
 				Name: volume.PersistentVolumeClaim.ClaimName,
 				Kind: "PersistentVolumeClaim",
 			},
-			// TODO: look up volume from claim name and get storage class from it
+			// TODO: Add a new field to VolumeBackup specifying the VolumeSnapshotClass
 			VolumeSnapshotClassName: &pv.Spec.StorageClassName,
 		},
 	}
@@ -277,6 +323,7 @@ func (r *ReconcileVolumeBackup) requestCreate(snapshot *v1alpha1.VolumeSnapshot,
 	return nil
 }
 
+// TODO: PodExecutor assumes the zeroth container, should pass in the container name instead
 func (r *ReconcileVolumeBackup) unfreeze(pod *corev1.Pod) error {
 	postHook := pod.Annotations["backups.example.com.post-hook"]
 	command := []string{"/bin/sh", "-i", "-c"}
@@ -291,4 +338,32 @@ func (r *ReconcileVolumeBackup) freeze(pod *corev1.Pod) error {
 	command = append(command, preHook)
 	_, err := r.executor.DoRemoteExec(pod, command)
 	return err
+}
+
+func checkVolumeBackupStatus(conditionType backupsv1alpha1.VolumeBackupConditionType, backup *backupsv1alpha1.VolumeBackup) bool {
+	for _, condition := range backup.Status.VolumeBackupConditions {
+		if condition.Type == conditionType {
+			return condition.Status == backupsv1alpha1.ConditionTrue
+		}
+	}
+	return false
+}
+
+func updateStatus(conditionType backupsv1alpha1.VolumeBackupConditionType, conditionStatus backupsv1alpha1.ConditionStatus, reason, message string, backup *backupsv1alpha1.VolumeBackup) {
+	newCondition := backupsv1alpha1.VolumeBackupCondition{
+		Type:               conditionType,
+		Status:             conditionStatus,
+		LastTransitionTime: metav1.Now(),
+		Reason:             reason,
+		Message:            message,
+	}
+	for idx, condition := range backup.Status.VolumeBackupConditions {
+		if condition.Type == conditionType {
+			backup.Status.VolumeBackupConditions[idx] = newCondition
+			return
+		}
+	}
+
+	// Condition is not found
+	backup.Status.VolumeBackupConditions = append(backup.Status.VolumeBackupConditions, newCondition)
 }
