@@ -27,6 +27,7 @@ func schema_pkg_apis_backups_v1alpha1_VolumeBackup(ref common.ReferenceCallback)
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Description: "VolumeBackup is the Schema for the volumebackups API",
+				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
 						SchemaProps: spec.SchemaProps{
@@ -70,6 +71,7 @@ func schema_pkg_apis_backups_v1alpha1_VolumeBackupProvider(ref common.ReferenceC
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Description: "VolumeBackupProvider is the Schema for the volumebackupproviders API",
+				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
 						SchemaProps: spec.SchemaProps{
@@ -113,10 +115,9 @@ func schema_pkg_apis_backups_v1alpha1_VolumeBackupProviderSpec(ref common.Refere
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Description: "VolumeBackupProviderSpec defines the desired state of VolumeBackupProvider",
-				Properties:  map[string]spec.Schema{},
+				Type:        []string{"object"},
 			},
 		},
-		Dependencies: []string{},
 	}
 }
 
@@ -125,10 +126,9 @@ func schema_pkg_apis_backups_v1alpha1_VolumeBackupProviderStatus(ref common.Refe
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Description: "VolumeBackupProviderStatus defines the observed state of VolumeBackupProvider",
-				Properties:  map[string]spec.Schema{},
+				Type:        []string{"object"},
 			},
 		},
-		Dependencies: []string{},
 	}
 }
 
@@ -137,6 +137,7 @@ func schema_pkg_apis_backups_v1alpha1_VolumeBackupSpec(ref common.ReferenceCallb
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Description: "VolumeBackupSpec defines the desired state of VolumeBackup",
+				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"applicationName": {
 						SchemaProps: spec.SchemaProps{
@@ -161,7 +162,6 @@ func schema_pkg_apis_backups_v1alpha1_VolumeBackupSpec(ref common.ReferenceCallb
 				Required: []string{"applicationName", "volumeName", "containerName"},
 			},
 		},
-		Dependencies: []string{},
 	}
 }
 
@@ -170,11 +170,19 @@ func schema_pkg_apis_backups_v1alpha1_VolumeBackupStatus(ref common.ReferenceCal
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Description: "VolumeBackupStatus defines the observed state of VolumeBackup",
+				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"volumeBackupCondition": {
 						SchemaProps: spec.SchemaProps{
 							Description: "INSERT ADDITIONAL STATUS FIELD - define observed state of cluster Important: Run \"operator-sdk generate k8s\" to regenerate code after modifying this file Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html",
-							Ref:         ref("github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1.VolumeBackupCondition"),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1.VolumeBackupCondition"),
+									},
+								},
+							},
 						},
 					},
 				},
