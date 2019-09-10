@@ -42,6 +42,34 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 		}
+		statusSnapshotIssued = &backupsv1alpha1.VolumeBackupStatus{
+			VolumeBackupConditions: []backupsv1alpha1.VolumeBackupCondition{
+				{
+					Type:   backupsv1alpha1.PodFrozen,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+				{
+					Type:   backupsv1alpha1.SnapshotIssued,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+			},
+		}
+		statusSnapshotCreated = &backupsv1alpha1.VolumeBackupStatus{
+			VolumeBackupConditions: []backupsv1alpha1.VolumeBackupCondition{
+				{
+					Type:   backupsv1alpha1.PodFrozen,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+				{
+					Type:   backupsv1alpha1.SnapshotIssued,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+				{
+					Type:   backupsv1alpha1.SnapshotCreated,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+			},
+		}
 	)
 
 	cases := []testCase{
@@ -53,15 +81,14 @@ func TestReconcile(t *testing.T) {
 				testHelpers.NewPersistentVolume(volumeName),
 				testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
 			},
-			snapshotObjs: []runtime.Object{},
-			volumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusEmpty),
-			expectedActions: []core.Action{
-				core.NewGetAction(gvr,
-					namespace,
-					applicationName+"-"+volumeName),
-			},
+			snapshotObjs:         []runtime.Object{},
+			volumeBackup:         testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusEmpty),
 			expectedResult:       reconcile.Result{},
 			expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusPodFrozen),
+			expectedKubeActions: []core.Action{
+				core.NewUpdateAction(gvr, namespace, testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusEmpty)),
+			},
+			expectedSnapshotActions: []core.Action{},
 		},
 		{
 			name: "no phase - should not freeze if things are missing",
@@ -72,7 +99,7 @@ func TestReconcile(t *testing.T) {
 			},
 			snapshotObjs:         []runtime.Object{},
 			volumeBackup:         testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusEmpty),
-			expectedActions:      []core.Action{},
+			expectedKubeActions:  []core.Action{},
 			expectedResult:       reconcile.Result{},
 			expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusEmpty),
 			expectedError: errors.NewNotFound(schema.GroupResource{
@@ -80,23 +107,48 @@ func TestReconcile(t *testing.T) {
 				Resource: "deployments",
 			}, applicationName),
 		},
-		// {
-		// 	name: "reconcile add - VolumeBackup object has not been created yet",
-		// 	objs: []runtime.Object{
-		// 		testHelpers.NewDeployment(namespace, applicationName, &replicas),
-		// 		testHelpers.NewPod(namespace, applicationName, 1),
-		// 		testHelpers.NewPersistentVolume(volumeName),
-		// 		testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
-		// 	},
-		// 	snapshotObjs:         []runtime.Object{},
-		// 	expectedActions:      []core.Action{},
-		// 	expectedVolumeBackup: nil,
-		// 	expectedResult: reconcile.Result{
-		// 		Requeue:      false,
-		// 		RequeueAfter: 0,
-		// 	},
-		// 	expectedError: nil,
-		// },
+		{
+			name: "Pod is frozen, should create a VolumeSnapshot object, and update the VolumeBackup status to SnapshotIssued",
+			objs: []runtime.Object{
+				testHelpers.NewDeployment(namespace, applicationName, &replicas),
+				testHelpers.NewPod(namespace, applicationName, 1),
+				testHelpers.NewPersistentVolume(volumeName),
+				testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
+			},
+			snapshotObjs: []runtime.Object{},
+			volumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusPodFrozen),
+			expectedSnapshotActions: []core.Action{
+				core.NewCreateAction(gvr, namespace, testHelpers.NewVolumeSnapshot(namespace, "example-application-to-backup-data-0", claimName)),
+			},
+			expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusSnapshotIssued),
+			expectedResult: reconcile.Result{
+				Requeue: false,
+			},
+			expectedError: nil,
+		},
+		{
+			name: "SnapshotIssued, should wait for a ReadyToUse/CreationTimestamp on the Snapshot and then update the status to SnapshotCreated",
+			objs: []runtime.Object{
+				testHelpers.NewDeployment(namespace, applicationName, &replicas),
+				testHelpers.NewPod(namespace, applicationName, 1),
+				testHelpers.NewPersistentVolume(volumeName),
+				testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
+			},
+			snapshotObjs: []runtime.Object{
+				testHelpers.NewVolumeSnapshot(namespace, "example-application-to-backup-test-vol-0", claimName),
+				testHelpers.NewVolumeSnapshot(namespace, "tom", claimName),
+			},
+			volumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusSnapshotIssued),
+			expectedKubeActions: []core.Action{
+				core.NewUpdateAction(gvr, namespace, testHelpers.NewVolumeBackup(namespace, "example-application-to-backup-data-0", applicationName, containerName, claimName, statusSnapshotIssued)),
+			},
+			expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, volumeName, statusSnapshotCreated),
+			expectedResult: reconcile.Result{
+				Requeue: false,
+			},
+			expectedError: nil,
+		},
+
 		// {
 		// 	name:            "reconcile add - can't find deployment",
 		// 	objs:            []runtime.Object{},

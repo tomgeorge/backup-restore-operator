@@ -212,21 +212,41 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 			} else {
 				reqLogger.Info("Backup already exists")
 			}
-			updateStatus(backupsv1alpha1.SnapshotIssued, backupsv1alpha1.ConditionTrue, "Created snapshot", "Created snapshot", instance)
-			updateErr := r.client.Status().Update(context.TODO(), instance)
-			if updateErr != nil {
-				reqLogger.Error(updateErr, "Unable to update the status of the VolumeBackup", "Name", instance.Name)
-				return reconcile.Result{}, err
-			}
-			return reconcile.Result{}, nil
 		}
+		updateStatus(backupsv1alpha1.SnapshotIssued, backupsv1alpha1.ConditionTrue, "Created snapshot", "Created snapshot", instance)
+		updateErr := r.client.Status().Update(context.TODO(), instance)
+		if updateErr != nil {
+			reqLogger.Error(updateErr, "Unable to update the status of the VolumeBackup", "Name", instance.Name)
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
 	}
 
 	if !checkVolumeBackupStatus(backupsv1alpha1.SnapshotCreated, instance) {
-		if err = r.unfreeze(&podToExec); err != nil {
-			reqLogger.Error(err, "Error un-freezing pod", "Pod.Name", podToExec.Name)
-			return reconcile.Result{}, err
+		// snapshotName := fmt.Sprintf("%v-%v", instance.Spec.ApplicationName, instance.Spec.VolumeName)
+		snapshotName := "tom"
+		snapshot, err := r.snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Get(snapshotName, metav1.GetOptions{})
+		if err != nil {
+			reqLogger.Error(err, "Error getting volumesnapshot")
+			return reconcile.Result{
+				Requeue: true,
+			}, err
 		}
+		if snapshot.Status.CreationTime != nil && snapshot.Status.ReadyToUse {
+			updateStatus(backupsv1alpha1.SnapshotCreated, backupsv1alpha1.ConditionTrue, "SnapshotReadyToUse", "Finished creating Volume Snapshot", instance)
+			err = r.client.Status().Update(context.TODO(), instance)
+			if err != nil {
+				reqLogger.Error(err, "Error updating the status of the VolumeBackup", "Name", instance.Name)
+				return reconcile.Result{}, err
+			}
+			return reconcile.Result{}, nil
+		} else {
+			return reconcile.Result{RequeueAfter: 60}, nil
+		}
+	}
+	if err = r.unfreeze(&podToExec); err != nil {
+		reqLogger.Error(err, "Error un-freezing pod", "Pod.Name", podToExec.Name)
+		return reconcile.Result{}, err
 	}
 	// TODO: Check VolumeSnapshot.Status Creation date before unfreezing
 	// TODO: Check if the pod is unfrozen before unfreezing.  If the creation date exists, and the pod is still frozen, then unfreeze
@@ -357,7 +377,5 @@ func updateStatus(conditionType backupsv1alpha1.VolumeBackupConditionType, condi
 			return
 		}
 	}
-	// Condition is not found
-	backup.Status.VolumeBackupConditions = []backupsv1alpha1.VolumeBackupCondition{}
 	backup.Status.VolumeBackupConditions = append(backup.Status.VolumeBackupConditions, newCondition)
 }

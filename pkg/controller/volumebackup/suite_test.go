@@ -21,6 +21,41 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+type newTestCase struct {
+	name                    string
+	preTestKubeState        []runtime.Object
+	expectedKubeState       []runtime.Object
+	preTestSnapshots        []runtime.Object
+	expectedSnapshots       []runtime.Object
+	preTestVolumeBackup     *volumebackupv1alpha1.VolumeBackup
+	expectedVolumeBackup    *volumebackupv1alpha1.VolumeBackup
+	expectedReconcileResult reconcile.Result
+	expectedError           error
+}
+
+func runInNewTestHarness(t *testing.T, test newTestCase) {
+	snapshotscheme.AddToScheme(scheme.Scheme)
+	volumebackupv1alpha1.AddToScheme(scheme.Scheme)
+
+	k8sClient := fakeClient.NewFakeClientWithScheme(scheme.Scheme, test.preTestKubeState...)
+	snapClientset := fakeSnapshotClient.NewSimpleClientset(test.preTestSnapshots...)
+	cfg := &rest.Config{}
+	executor := executor.CreateNewFakePodExecutor()
+
+	reconcileVolumeBackup := &ReconcileVolumeBackup{
+		client:        k8sClient,
+		config:        cfg,
+		snapClientset: snapClientset,
+		scheme:        scheme.Scheme,
+		executor:      executor,
+	}
+
+	request := reconcile.Request{}
+
+	result, err := reconcileVolumeBackup.Reconcile(request)
+
+}
+
 // testCase contains options for the run of a test
 type testCase struct {
 
@@ -40,8 +75,11 @@ type testCase struct {
 	// A VolumeBackup object that is expected to be there when the test runs
 	volumeBackup *volumebackupv1alpha1.VolumeBackup
 
-	// The expected actions (Create/Update/Delete) that the snapshot client is supposed to perform
-	expectedActions []core.Action
+	// The expected actions (Create/Update/Delete) that the kubernetes client is supposed to perform
+	expectedKubeActions []core.Action
+
+	// The expected actions to be performed by the snapshot client set
+	expectedSnapshotActions []core.Action
 
 	// The VolumeBackup expected after a reconcile in a given state
 	expectedVolumeBackup *backupsv1alpha1.VolumeBackup
@@ -67,6 +105,7 @@ func runInTestHarness(t *testing.T, test testCase) {
 
 	k8sClient := fakeClient.NewFakeClientWithScheme(scheme.Scheme, test.objs...)
 	snapClientset := fakeSnapshotClient.NewSimpleClientset(test.snapshotObjs...)
+
 	cfg := &rest.Config{}
 	executor := executor.CreateNewFakePodExecutor()
 	reconcileVolumeBackup := &ReconcileVolumeBackup{
@@ -104,22 +143,32 @@ func runInTestHarness(t *testing.T, test testCase) {
 }
 
 func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBackup, result reconcile.Result, err error, t *testing.T) {
-	client, ok := reconcileVolumeBackup.snapClientset.(*fakeSnapshotClient.Clientset)
+	snapshotClient, ok := reconcileVolumeBackup.snapClientset.(*fakeSnapshotClient.Clientset)
 	if !ok {
 		t.Errorf("Fatal - test %v - could not assert fakeSnapshotClient.Clientset type on snapshot client", testcase.name)
 	}
 
 	// Fail if the expected actions are not the same as the actual actions in the snapshot clientset
-	if len(client.Actions()) != len(testcase.expectedActions) {
-		t.Errorf("Error - test %v - expected %v actions received by client but was %v", testcase.name, len(testcase.expectedActions), len(client.Actions()))
-		t.Errorf("%v", pretty.Diff(testcase.expectedActions, client.Actions()))
+	if len(snapshotClient.Actions()) != len(testcase.expectedSnapshotActions) {
+		t.Errorf("Error - test %v - expected %v actions received by client but was %v", testcase.name, len(testcase.expectedSnapshotActions), len(snapshotClient.Actions()))
+		t.Errorf("%v", pretty.Diff(testcase.expectedSnapshotActions, snapshotClient.Actions()))
 		t.FailNow()
 	}
-	for index, expected := range testcase.expectedActions {
-		actual := client.Actions()[index]
+	for index, expected := range testcase.expectedSnapshotActions {
+		actual := snapshotClient.Actions()[index]
 		if !reflect.DeepEqual(expected, actual) {
 			t.Errorf("Error - test %v - objects do not match", testcase.name)
 			t.Errorf("%v", pretty.Diff(expected, actual))
+		}
+	}
+
+	for _, action := range testcase.expectedKubeActions {
+		var actual runtime.Object = nil
+		err := reconcileVolumeBackup.client.Get(context.TODO(), types.NamespacedName{
+			Namespace: action.GetNamespace(),
+			Name:      action.GetResource().Resource,
+		}, actual)
+		if err != nil {
 		}
 	}
 

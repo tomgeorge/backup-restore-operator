@@ -19,35 +19,48 @@ type VolumeBackupSpec struct {
 }
 
 // VolumeBackupStatus defines the observed state of VolumeBackup
-// +k8s:openapi-gen=true
 type VolumeBackupStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
-	// Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html
-	VolumeBackupConditions []VolumeBackupCondition `json:"volumeBackupCondition"`
+	// The list of VolumeBackupConditions that the Backup goes through
+	VolumeBackupConditions []VolumeBackupCondition `json:"volumeBackupConditions,omitempty"`
 }
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// VolumeBackupStatusList contains a list of VolumeBackup
+// type VolumeBackupStatusList struct {
+// 	metav1.TypeMeta `json:",inline"`
+// 	metav1.ListMeta `json:"metadata,omitempty"`
+// 	Items           []VolumeBackupStatus `json:"items"`
+// }
+
+// // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// // VolumeBackupConditionList contains a list of VolumeBackup
+// type VolumeBackupConditionList struct {
+// 	metav1.TypeMeta `json:",inline"`
+// 	metav1.ListMeta `json:"metadata,omitempty"`
+// 	Items           []VolumeBackupCondition `json:"items"`
+// }
 
 type VolumeBackupCondition struct {
 	// Type is the type of the condition.
 	// More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#pod-conditions
-	Type VolumeBackupConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=VolumeBackupConditionType"`
+	Type VolumeBackupConditionType `json:"type"`
 	// Status is the status of the condition.
 	// Can be True, False, Unknown.
 	// More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#pod-conditions
 	// +optional
-	Status ConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=ConditionStatus"`
+	Status ConditionStatus `json:"status"`
 	// Last time we probed the condition.
 	// +optional
 	// LastProbeTime metav1.Time `json:"lastProbeTime,omitempty" protobuf:"bytes,3,opt,name=lastProbeTime"`
 	// Last time the condition transitioned from one status to another.
 	// +optional
-	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty" protobuf:"bytes,4,opt,name=lastTransitionTime"`
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
 	// Unique, one-word, CamelCase reason for the condition's last transition.
 	// +optional
-	Reason string `json:"reason,omitempty" protobuf:"bytes,5,opt,name=reason"`
+	Reason string `json:"reason,omitempty"`
 	// Human-readable message indicating details about last transition.
 	// +optional
-	Message string `json:"message,omitempty" protobuf:"bytes,6,opt,name=message"`
+	Message string `json:"message,omitempty"`
 }
 
 ///
