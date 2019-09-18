@@ -17,7 +17,7 @@ spec:
       containers:
         - name: backup-restore-operator
           # Replace this with the built image name
-          image: 	docker.io/tomgeorge/backup-restore-operator:61e7875
+          image: 	docker.io/tomgeorge/backup-restore-operator:5b520e1
           ports:
           - containerPort: 60000
             name: metrics

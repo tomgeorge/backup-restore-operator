@@ -3,7 +3,6 @@
 An operator to easily back up the data of a stateful application in Kubernetes.  Uses [CSI](https://kubernetes-csi.github.io/docs/) for kubernetes-native backup management. 
 
 
-
 ### Contents
 
 1. [Prerequesites](#prereqs)
@@ -14,7 +13,6 @@ An operator to easily back up the data of a stateful application in Kubernetes. 
 
 - Kubernetes 1.12+, with the `VolumeSnapshotDataSource=true` feature gate set on the API server.  See [the documentation](https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/) to learn how to enable a feature gate on a kubernetes component.
 - A CSI storage driver intsalled in the cluster.  See the [list of drivers](https://kubernetes-csi.github.io/docs/drivers.html) for a list of options.
-
 
 
 ### Installing the Operator <a name="install"></a>
@@ -133,7 +131,7 @@ Also check the logs to make sure you don't see any errors.
         volumes:
         - name: mysql-data
           persistentVolumeClaim:
-            claimName: mysql
+            claimName: mysql-claim
   ```
 
   + Create a VolumeBackup object with a reference to the application:
@@ -143,7 +141,9 @@ Also check the logs to make sure you don't see any errors.
   metadata:
     name: example-volumebackup
   spec:
-    applicationRef: mysql
+    applicationName: mysql
+    containerName: mysql
+    volumeName: mysql-claim
   ```
 
 You should now see a `VolumeBackup` and it's accompanying `VolumeSnapshot` and `VolumeSnapshotContent` objects:
