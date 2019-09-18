@@ -21,7 +21,7 @@ var (
 	apiVersion            = "backups.example.com/v1alpha1"
 	kind                  = "VolumeBackup"
 	gvr                   = schema.GroupVersionResource{
-		Group:    "volumesnapshot",
+		Group:    "snapshot.storage.k8s.io",
 		Resource: "volumesnapshots",
 		Version:  "v1alpha1",
 	}
@@ -29,10 +29,6 @@ var (
 
 func NewVolumeBackup(namespace, volumeBackupName, applicationName, containerName, volumeName string, status *volumebackupv1alpha1.VolumeBackupStatus) *volumebackupv1alpha1.VolumeBackup {
 	return &volumebackupv1alpha1.VolumeBackup{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: volumebackupv1alpha1.SchemeGroupVersion.String(),
-			Kind:       "VolumeBackup",
-		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      volumeBackupName,
 			Namespace: namespace,
@@ -63,7 +59,29 @@ func NewVolumeSnapshot(namespace, snapshotName, claimName string) *v1alpha1.Volu
 			},
 		},
 	}
+}
 
+func NewReadyVolumeSnapshot(namespace, snapshotName, claimName string) *v1alpha1.VolumeSnapshot {
+	return &v1alpha1.VolumeSnapshot{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      snapshotName,
+			Namespace: "example",
+			OwnerReferences: []v1.OwnerReference{
+				NewOwnerReference(apiVersion, kind, name),
+			},
+		},
+		Spec: v1alpha1.VolumeSnapshotSpec{
+			VolumeSnapshotClassName: &storageclass,
+			Source: &corev1.TypedLocalObjectReference{
+				Kind: "PersistentVolumeClaim",
+				Name: claimName,
+			},
+		},
+		Status: v1alpha1.VolumeSnapshotStatus{
+			ReadyToUse:   true,
+			CreationTime: &v1.Time{},
+		},
+	}
 }
 
 func NewVolumeBackupList() *volumebackupv1alpha1.VolumeBackupList {
@@ -141,7 +159,7 @@ func NewPod(namespace, name string, volumeCount int) *corev1.Pod {
 	volumes := []corev1.Volume{}
 	for i := 0; i < volumeCount; i++ {
 		volume := corev1.Volume{
-			Name: fmt.Sprintf("data-%d", i),
+			Name: fmt.Sprintf("pod-named-volume-%d", i),
 			VolumeSource: corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 					ClaimName: fmt.Sprintf("test-claim-%d", i),

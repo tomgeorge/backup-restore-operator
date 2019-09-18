@@ -95,7 +95,6 @@ type ReconcileVolumeBackup struct {
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
-	//reqLogger := log
 	reqLogger.Info("Reconciling VolumeBackup")
 
 	// Fetch the VolumeBackup instance
@@ -205,7 +204,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	if !checkVolumeBackupStatus(backupsv1alpha1.SnapshotIssued, instance) {
-		if err = r.issueSnapshot(instance, &podToExec); err != nil {
+		if err = r.issueSnapshot(instance, deployment, &podToExec); err != nil {
 			if !kubeErrors.IsAlreadyExists(err) {
 				reqLogger.Error(err, "Error creating volumesnapshot")
 				return reconcile.Result{}, err
@@ -223,9 +222,8 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	if !checkVolumeBackupStatus(backupsv1alpha1.SnapshotCreated, instance) {
-		// snapshotName := fmt.Sprintf("%v-%v", instance.Spec.ApplicationName, instance.Spec.VolumeName)
-		snapshotName := "tom"
-		snapshot, err := r.snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Get(snapshotName, metav1.GetOptions{})
+		snapshotName := fmt.Sprintf("%v-%v", deployment.Name, instance.Spec.VolumeName)
+		snapshot, err := r.snapClientset.SnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Get(snapshotName, metav1.GetOptions{})
 		if err != nil {
 			reqLogger.Error(err, "Error getting volumesnapshot")
 			return reconcile.Result{
@@ -261,39 +259,38 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 	return reconcile.Result{}, nil
 }
 
-func (r *ReconcileVolumeBackup) issueSnapshot(instance *backupsv1alpha1.VolumeBackup, pod *corev1.Pod) error {
-	snapshots, err := r.createVolumeSnapshotsFromPod(pod)
+// issueSnapshot finds the correct volume in the pod to backup according to the VolumeBackup spec, then calls
+// createVolumeSnapshotFromPod and requestCreate
+func (r *ReconcileVolumeBackup) issueSnapshot(instance *backupsv1alpha1.VolumeBackup, deployment *appsv1.Deployment, pod *corev1.Pod) error {
+	volumeToBackup := &corev1.Volume{}
+	volumes := pod.Spec.Volumes
+	for _, vol := range pod.Spec.Volumes {
+		if vol.VolumeSource.PersistentVolumeClaim.ClaimName == instance.Spec.VolumeName {
+			volumeToBackup = vol.DeepCopy()
+		}
+	}
+	for i := 0; i < len(volumes); i++ {
+		if volumes[i].VolumeSource.PersistentVolumeClaim != nil &&
+			volumes[i].VolumeSource.PersistentVolumeClaim.ClaimName == instance.Spec.VolumeName {
+			volumeToBackup = volumes[i].DeepCopy()
+		}
+	}
+	snapshot, err := r.createVolumeSnapshotFromPod(deployment, pod, volumeToBackup)
 	if err != nil {
 		return err
 	}
-	for i, _ := range snapshots {
-		snapshot := &snapshots[i]
-		if err := r.requestCreate(snapshot, instance); err != nil {
-			return err
-		}
+	if err := r.requestCreate(snapshot, instance); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (r *ReconcileVolumeBackup) createVolumeSnapshotsFromPod(pod *corev1.Pod) ([]v1alpha1.VolumeSnapshot, error) {
-	snapshots := []v1alpha1.VolumeSnapshot{}
-	for _, volume := range pod.Spec.Volumes {
-		if volume.VolumeSource.PersistentVolumeClaim != nil {
-			snapshot, err := r.createVolumeSnapshotFromPod(pod, volume)
-			if err != nil {
-				return nil, err
-			}
-			snapshots = append(snapshots, *snapshot)
-		}
-	}
-	return snapshots, nil
-}
-
-func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, volume corev1.Volume) (*v1alpha1.VolumeSnapshot, error) {
+// createVolumeSnapshotFromPod takes a deployment, a pod, and a volume and creates a VolumeSnapshot of the form deploymentName-claimName
+func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(parentDeployment *appsv1.Deployment, pod *corev1.Pod, volume *corev1.Volume) (*v1alpha1.VolumeSnapshot, error) {
 	claim := &corev1.PersistentVolumeClaim{}
 	err := r.client.Get(context.TODO(), types.NamespacedName{
 		Namespace: pod.Namespace,
-		Name:      volume.PersistentVolumeClaim.ClaimName,
+		Name:      volume.VolumeSource.PersistentVolumeClaim.ClaimName,
 	}, claim)
 	if err != nil {
 		return nil, err
@@ -309,7 +306,7 @@ func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, vol
 
 	snapshot := &v1alpha1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%v-%v", pod.ObjectMeta.OwnerReferences[0].Name, volume.Name),
+			Name:      fmt.Sprintf("%v-%v", parentDeployment.Name, volume.PersistentVolumeClaim.ClaimName),
 			Namespace: pod.Namespace,
 		},
 		Spec: v1alpha1.VolumeSnapshotSpec{
@@ -324,12 +321,13 @@ func (r *ReconcileVolumeBackup) createVolumeSnapshotFromPod(pod *corev1.Pod, vol
 	return snapshot, nil
 }
 
+// requestCreate sends the create request to the API server
 func (r *ReconcileVolumeBackup) requestCreate(snapshot *v1alpha1.VolumeSnapshot, instance *backupsv1alpha1.VolumeBackup) error {
 	if err := controllerutil.SetControllerReference(instance, snapshot, r.scheme); err != nil {
 		log.Error(err, "Unable to set owner reference of %v", snapshot.Name)
 		return err
 	}
-	_, err := r.snapClientset.VolumesnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Create(snapshot)
+	_, err := r.snapClientset.SnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Create(snapshot)
 	if err != nil {
 		log.Error(err, "Error creating VolumeSnapshot")
 		return err

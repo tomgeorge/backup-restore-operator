@@ -21,7 +21,7 @@ require (
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
 	github.com/imdario/mergo v0.3.7 // indirect
 	github.com/kr/pretty v0.1.0
-	github.com/kubernetes-csi/external-snapshotter v1.1.0
+	github.com/kubernetes-csi/external-snapshotter v1.2.1
 	github.com/mailru/easyjson v0.0.0-20190626092158-b2ccc519800e // indirect
 	github.com/onsi/ginkgo v1.10.1 // indirect
 	github.com/onsi/gomega v1.7.0 // indirect

@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	"github.com/kr/pretty"
+	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
 	fakeSnapshotClient "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned/fake"
 	snapshotscheme "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned/scheme"
 	backupsv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
 	volumebackupv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
 	"github.com/tomgeorge/backup-restore-operator/pkg/util/executor"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -20,41 +22,6 @@ import (
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
-
-type newTestCase struct {
-	name                    string
-	preTestKubeState        []runtime.Object
-	expectedKubeState       []runtime.Object
-	preTestSnapshots        []runtime.Object
-	expectedSnapshots       []runtime.Object
-	preTestVolumeBackup     *volumebackupv1alpha1.VolumeBackup
-	expectedVolumeBackup    *volumebackupv1alpha1.VolumeBackup
-	expectedReconcileResult reconcile.Result
-	expectedError           error
-}
-
-func runInNewTestHarness(t *testing.T, test newTestCase) {
-	snapshotscheme.AddToScheme(scheme.Scheme)
-	volumebackupv1alpha1.AddToScheme(scheme.Scheme)
-
-	k8sClient := fakeClient.NewFakeClientWithScheme(scheme.Scheme, test.preTestKubeState...)
-	snapClientset := fakeSnapshotClient.NewSimpleClientset(test.preTestSnapshots...)
-	cfg := &rest.Config{}
-	executor := executor.CreateNewFakePodExecutor()
-
-	reconcileVolumeBackup := &ReconcileVolumeBackup{
-		client:        k8sClient,
-		config:        cfg,
-		snapClientset: snapClientset,
-		scheme:        scheme.Scheme,
-		executor:      executor,
-	}
-
-	request := reconcile.Request{}
-
-	result, err := reconcileVolumeBackup.Reconcile(request)
-
-}
 
 // testCase contains options for the run of a test
 type testCase struct {
@@ -83,6 +50,9 @@ type testCase struct {
 
 	// The VolumeBackup expected after a reconcile in a given state
 	expectedVolumeBackup *backupsv1alpha1.VolumeBackup
+
+	// The expected VolumeSnapshot after the test is run
+	expectedVolumeSnapshot *v1alpha1.VolumeSnapshot
 
 	// The expected reconcile result
 	expectedResult reconcile.Result
@@ -162,16 +132,6 @@ func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBa
 		}
 	}
 
-	for _, action := range testcase.expectedKubeActions {
-		var actual runtime.Object = nil
-		err := reconcileVolumeBackup.client.Get(context.TODO(), types.NamespacedName{
-			Namespace: action.GetNamespace(),
-			Name:      action.GetResource().Resource,
-		}, actual)
-		if err != nil {
-		}
-	}
-
 	// Fail if the expected error does not match the actual error
 	if !reflect.DeepEqual(err, testcase.expectedError) {
 		t.Errorf("Error - test %v - expected error but got", testcase.name)
@@ -203,4 +163,22 @@ func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBa
 			}
 		}
 	}
+
+	if testcase.expectedVolumeSnapshot != nil {
+		actualVolumeSnapshot, err := snapshotClient.SnapshotV1alpha1().
+			VolumeSnapshots(testcase.expectedVolumeSnapshot.Namespace).
+			Get(testcase.expectedVolumeSnapshot.Name, v1.GetOptions{})
+
+		if err != nil {
+			t.Errorf("Error - test %v - can't get VolumeSnapshot: %v", testcase.name, err)
+		}
+
+		if !reflect.DeepEqual(actualVolumeSnapshot, testcase.expectedVolumeSnapshot) {
+			t.Errorf("Error - test %v - actual object and expected are not the same", testcase.name)
+			t.Errorf("%v", pretty.Diff(actualVolumeSnapshot, testcase.expectedVolumeSnapshot))
+		}
+
+	}
+
+	// Compare the expected volumesnapshot (if any) against the one returned by the API server
 }
