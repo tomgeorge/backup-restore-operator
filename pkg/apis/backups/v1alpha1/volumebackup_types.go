@@ -21,7 +21,7 @@ type VolumeBackupSpec struct {
 // VolumeBackupStatus defines the observed state of VolumeBackup
 type VolumeBackupStatus struct {
 	// The list of VolumeBackupConditions that the Backup goes through
-	VolumeBackupConditions []VolumeBackupCondition `json:"volumeBackupConditions,omitempty"`
+	Conditions []VolumeBackupCondition `json:"conditions,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -117,4 +117,43 @@ type VolumeBackupList struct {
 
 func init() {
 	SchemeBuilder.Register(&VolumeBackup{}, &VolumeBackupList{})
+}
+
+func (vb *VolumeBackup) IsFrozen() bool {
+	return vb.checkStatus(PodFrozen)
+}
+
+func (vb *VolumeBackup) IsSnapshotIssued() bool {
+	return vb.checkStatus(SnapshotIssued)
+}
+
+func (vb *VolumeBackup) IsSnapshotCreated() bool {
+	return vb.checkStatus(SnapshotCreated)
+}
+
+func (vb *VolumeBackup) checkStatus(conditionType VolumeBackupConditionType) bool {
+	for _, condition := range vb.Status.Conditions {
+		if condition.Type == conditionType {
+			return condition.Status == ConditionTrue
+		}
+	}
+	return false
+}
+
+func (vb *VolumeBackup) UpdateStatus(conditionType VolumeBackupConditionType, conditionStatus ConditionStatus, reason, message string) {
+	newCondition := VolumeBackupCondition{
+		Type:               conditionType,
+		Status:             conditionStatus,
+		LastTransitionTime: metav1.Now(),
+		Reason:             reason,
+		Message:            message,
+	}
+	for idx, condition := range vb.Status.Conditions {
+		if condition.Type == conditionType {
+			vb.Status.Conditions[idx] = newCondition
+			return
+		}
+	}
+	vb.Status.Conditions = append(vb.Status.Conditions, newCondition)
+	return
 }

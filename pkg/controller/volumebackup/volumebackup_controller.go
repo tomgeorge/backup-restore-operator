@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
 	snapclientset "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned"
@@ -20,9 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
@@ -45,7 +46,13 @@ func newReconciler(mgr manager.Manager) reconcile.Reconciler {
 	if err != nil {
 		panic(err)
 	}
-	return &ReconcileVolumeBackup{client: mgr.GetClient(), config: mgr.GetConfig(), snapClientset: snapClientset, scheme: mgr.GetScheme(), executor: executor.CreateNewRemotePodExecutor(mgr.GetConfig())}
+	return &ReconcileVolumeBackup{
+		client:        mgr.GetClient(),
+		snapClientset: snapClientset,
+		config:        mgr.GetConfig(),
+		scheme:        mgr.GetScheme(),
+		executor:      executor.CreateNewRemotePodExecutor(mgr.GetConfig()),
+	}
 }
 
 // add adds a new Controller to mgr with r as the reconcile.Reconciler
@@ -96,6 +103,7 @@ type ReconcileVolumeBackup struct {
 func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
 	reqLogger.Info("Reconciling VolumeBackup")
+	defer reqLogger.Info("End Reconcile Loop")
 
 	// Fetch the VolumeBackup instance
 	instance := &backupsv1alpha1.VolumeBackup{}
@@ -134,10 +142,10 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 
 	//TODO: What happens if the pod is in a bad state (error, crashloop, etc.)?
 	//TODO: maybe simulate this in the e2e stuff
-	err = r.client.List(context.TODO(), &client.ListOptions{
+	err = r.client.List(context.TODO(), pods, &client.ListOptions{
 		Namespace:     deployment.ObjectMeta.Namespace,
 		LabelSelector: selector,
-	}, pods)
+	})
 
 	if err != nil {
 		reqLogger.Error(err, "Could not list pods for deployment %v", deployment.Name)
@@ -180,10 +188,10 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		return reconcile.Result{Requeue: true}, nil
 	}
 
-	if !checkVolumeBackupStatus(backupsv1alpha1.PodFrozen, instance) && !checkVolumeBackupStatus(backupsv1alpha1.SnapshotIssued, instance) {
+	if !instance.IsFrozen() && !instance.IsSnapshotIssued() {
 		if err := r.freeze(&podToExec); err != nil {
 			reqLogger.Error(err, "Error freezing pod", "Pod.Name", podToExec.Name)
-			updateStatus(backupsv1alpha1.PodFrozen, backupsv1alpha1.ConditionFalse, "Could not freeze pod", err.Error(), instance)
+			instance.UpdateStatus(backupsv1alpha1.PodFrozen, backupsv1alpha1.ConditionFalse, "ErrorFreezing", err.Error())
 			updateErr := r.client.Status().Update(context.TODO(), instance)
 			if updateErr != nil {
 				reqLogger.Error(updateErr, "Unable to update the status of VolumeBackup", "Name", instance.Name)
@@ -191,7 +199,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 			}
 			return reconcile.Result{}, err
 		}
-		updateStatus(backupsv1alpha1.PodFrozen, backupsv1alpha1.ConditionTrue, "Freeze Successful", fmt.Sprintf("Froze Pod %v", podToExec.Name), instance)
+		instance.UpdateStatus(backupsv1alpha1.PodFrozen, backupsv1alpha1.ConditionTrue, "FreezeSuccessful", fmt.Sprintf("Froze Pod %v", podToExec.Name))
 		reqLogger.Info("Updating status", "Name", instance.Name)
 		updateerr := r.client.Status().Update(context.TODO(), instance)
 		if updateerr != nil {
@@ -203,7 +211,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	if !checkVolumeBackupStatus(backupsv1alpha1.SnapshotIssued, instance) {
+	if !instance.IsSnapshotIssued() {
 		if err = r.issueSnapshot(instance, deployment, &podToExec); err != nil {
 			if !kubeErrors.IsAlreadyExists(err) {
 				reqLogger.Error(err, "Error creating volumesnapshot")
@@ -212,7 +220,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 				reqLogger.Info("Backup already exists")
 			}
 		}
-		updateStatus(backupsv1alpha1.SnapshotIssued, backupsv1alpha1.ConditionTrue, "Created snapshot", "Created snapshot", instance)
+		instance.UpdateStatus(backupsv1alpha1.SnapshotIssued, backupsv1alpha1.ConditionTrue, "Created snapshot", "Created snapshot")
 		updateErr := r.client.Status().Update(context.TODO(), instance)
 		if updateErr != nil {
 			reqLogger.Error(updateErr, "Unable to update the status of the VolumeBackup", "Name", instance.Name)
@@ -221,7 +229,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	if !checkVolumeBackupStatus(backupsv1alpha1.SnapshotCreated, instance) {
+	if !instance.IsSnapshotCreated() {
 		snapshotName := fmt.Sprintf("%v-%v", deployment.Name, instance.Spec.VolumeName)
 		snapshot, err := r.snapClientset.SnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Get(snapshotName, metav1.GetOptions{})
 		if err != nil {
@@ -231,7 +239,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 			}, err
 		}
 		if snapshot.Status.CreationTime != nil && snapshot.Status.ReadyToUse {
-			updateStatus(backupsv1alpha1.SnapshotCreated, backupsv1alpha1.ConditionTrue, "SnapshotReadyToUse", "Finished creating Volume Snapshot", instance)
+			instance.UpdateStatus(backupsv1alpha1.SnapshotCreated, backupsv1alpha1.ConditionTrue, "SnapshotReadyToUse", "Finished creating Volume Snapshot")
 			err = r.client.Status().Update(context.TODO(), instance)
 			if err != nil {
 				reqLogger.Error(err, "Error updating the status of the VolumeBackup", "Name", instance.Name)
@@ -239,7 +247,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 			}
 			return reconcile.Result{}, nil
 		} else {
-			return reconcile.Result{RequeueAfter: 60}, nil
+			return reconcile.Result{RequeueAfter: 60 * time.Second}, nil
 		}
 	}
 	if err = r.unfreeze(&podToExec); err != nil {
@@ -265,7 +273,7 @@ func (r *ReconcileVolumeBackup) issueSnapshot(instance *backupsv1alpha1.VolumeBa
 	volumeToBackup := &corev1.Volume{}
 	volumes := pod.Spec.Volumes
 	for _, vol := range pod.Spec.Volumes {
-		if vol.VolumeSource.PersistentVolumeClaim.ClaimName == instance.Spec.VolumeName {
+		if vol.VolumeSource.PersistentVolumeClaim != nil && vol.VolumeSource.PersistentVolumeClaim.ClaimName == instance.Spec.VolumeName {
 			volumeToBackup = vol.DeepCopy()
 		}
 	}
@@ -350,30 +358,4 @@ func (r *ReconcileVolumeBackup) freeze(pod *corev1.Pod) error {
 	command = append(command, preHook)
 	_, err := r.executor.DoRemoteExec(pod, command)
 	return err
-}
-
-func checkVolumeBackupStatus(conditionType backupsv1alpha1.VolumeBackupConditionType, backup *backupsv1alpha1.VolumeBackup) bool {
-	for _, condition := range backup.Status.VolumeBackupConditions {
-		if condition.Type == conditionType {
-			return condition.Status == backupsv1alpha1.ConditionTrue
-		}
-	}
-	return false
-}
-
-func updateStatus(conditionType backupsv1alpha1.VolumeBackupConditionType, conditionStatus backupsv1alpha1.ConditionStatus, reason, message string, backup *backupsv1alpha1.VolumeBackup) {
-	newCondition := backupsv1alpha1.VolumeBackupCondition{
-		Type:               conditionType,
-		Status:             conditionStatus,
-		LastTransitionTime: metav1.Now(),
-		Reason:             reason,
-		Message:            message,
-	}
-	for idx, condition := range backup.Status.VolumeBackupConditions {
-		if condition.Type == conditionType {
-			backup.Status.VolumeBackupConditions[idx] = newCondition
-			return
-		}
-	}
-	backup.Status.VolumeBackupConditions = append(backup.Status.VolumeBackupConditions, newCondition)
 }

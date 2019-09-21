@@ -155,11 +155,11 @@ func evaluateResults(testcase testCase, reconcileVolumeBackup *ReconcileVolumeBa
 			t.Errorf("Error - test %v - could not get volumebackup", testcase.name)
 		}
 
-		for i, condition := range backup.Status.VolumeBackupConditions {
-			if !(testcase.expectedVolumeBackup.Status.VolumeBackupConditions[i].Type == condition.Type &&
-				testcase.expectedVolumeBackup.Status.VolumeBackupConditions[i].Status == condition.Status) {
+		for i, condition := range backup.Status.Conditions {
+			if !(testcase.expectedVolumeBackup.Status.Conditions[i].Type == condition.Type &&
+				testcase.expectedVolumeBackup.Status.Conditions[i].Status == condition.Status) {
 				t.Errorf("Error - test %v - expected backup status does not match actual", testcase.name)
-				t.Errorf("%v", pretty.Diff(testcase.expectedVolumeBackup.Status.VolumeBackupConditions, backup.Status.VolumeBackupConditions))
+				t.Errorf("%v", pretty.Diff(testcase.expectedVolumeBackup.Status.Conditions, backup.Status.Conditions))
 			}
 		}
 	}

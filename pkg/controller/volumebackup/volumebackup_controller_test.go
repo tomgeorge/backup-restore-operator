@@ -33,7 +33,7 @@ func TestReconcile(t *testing.T) {
 		}
 		statusEmpty     = &backupsv1alpha1.VolumeBackupStatus{}
 		statusPodFrozen = &backupsv1alpha1.VolumeBackupStatus{
-			VolumeBackupConditions: []backupsv1alpha1.VolumeBackupCondition{
+			Conditions: []backupsv1alpha1.VolumeBackupCondition{
 				{
 					Type:   backupsv1alpha1.PodFrozen,
 					Status: backupsv1alpha1.ConditionTrue,
@@ -41,7 +41,7 @@ func TestReconcile(t *testing.T) {
 			},
 		}
 		statusSnapshotIssued = &backupsv1alpha1.VolumeBackupStatus{
-			VolumeBackupConditions: []backupsv1alpha1.VolumeBackupCondition{
+			Conditions: []backupsv1alpha1.VolumeBackupCondition{
 				{
 					Type:   backupsv1alpha1.PodFrozen,
 					Status: backupsv1alpha1.ConditionTrue,
@@ -53,7 +53,7 @@ func TestReconcile(t *testing.T) {
 			},
 		}
 		statusSnapshotCreated = &backupsv1alpha1.VolumeBackupStatus{
-			VolumeBackupConditions: []backupsv1alpha1.VolumeBackupCondition{
+			Conditions: []backupsv1alpha1.VolumeBackupCondition{
 				{
 					Type:   backupsv1alpha1.PodFrozen,
 					Status: backupsv1alpha1.ConditionTrue,
