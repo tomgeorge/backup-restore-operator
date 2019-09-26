@@ -200,6 +200,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 			return reconcile.Result{}, err
 		}
 		instance.UpdateStatus(backupsv1alpha1.PodFrozen, backupsv1alpha1.ConditionTrue, "FreezeSuccessful", fmt.Sprintf("Froze Pod %v", podToExec.Name))
+		instance.Status.PodPhase = backupsv1alpha1.PhaseFrozen
 		reqLogger.Info("Updating status", "Name", instance.Name)
 		updateerr := r.client.Status().Update(context.TODO(), instance)
 		if updateerr != nil {
@@ -250,9 +251,20 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 			return reconcile.Result{RequeueAfter: 60 * time.Second}, nil
 		}
 	}
-	if err = r.unfreeze(&podToExec); err != nil {
-		reqLogger.Error(err, "Error un-freezing pod", "Pod.Name", podToExec.Name)
-		return reconcile.Result{}, err
+
+	if instance.IsPodFrozen() {
+		reqLogger.Info("Unfreezing pod", "Pod.Name", podToExec.Name)
+		if err = r.unfreeze(&podToExec); err != nil {
+			reqLogger.Error(err, "Error un-freezing pod", "Pod.Name", podToExec.Name)
+			return reconcile.Result{}, err
+		}
+		instance.Status.PodPhase = backupsv1alpha1.PhaseUnfrozen
+		err = r.client.Status().Update(context.TODO(), instance)
+		if err != nil {
+			reqLogger.Error(err, "Error updating the status of the VolumeBackup", "Name", instance.Name)
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
 	}
 	// TODO: Check VolumeSnapshot.Status Creation date before unfreezing
 	// TODO: Check if the pod is unfrozen before unfreezing.  If the creation date exists, and the pod is still frozen, then unfreeze

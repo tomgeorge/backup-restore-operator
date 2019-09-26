@@ -22,7 +22,15 @@ type VolumeBackupSpec struct {
 type VolumeBackupStatus struct {
 	// The list of VolumeBackupConditions that the Backup goes through
 	Conditions []VolumeBackupCondition `json:"conditions,omitempty"`
+	PodPhase   VolumeBackupPodPhase    `json:"podPhase,omitempty"`
 }
+
+type VolumeBackupPodPhase string
+
+const (
+	PhaseFrozen   VolumeBackupPodPhase = "Frozen"
+	PhaseUnfrozen VolumeBackupPodPhase = "Unfrozen"
+)
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // VolumeBackupStatusList contains a list of VolumeBackup
@@ -121,6 +129,10 @@ func init() {
 
 func (vb *VolumeBackup) IsFrozen() bool {
 	return vb.checkStatus(PodFrozen)
+}
+
+func (vb *VolumeBackup) IsPodFrozen() bool {
+	return vb.Status.PodPhase == PhaseFrozen
 }
 
 func (vb *VolumeBackup) IsSnapshotIssued() bool {
