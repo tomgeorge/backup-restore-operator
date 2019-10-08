@@ -2,11 +2,13 @@ package helperstest
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
 	volumebackupv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -25,7 +27,17 @@ var (
 		Resource: "volumesnapshots",
 		Version:  "v1alpha1",
 	}
+	StatusEmpty = &volumebackupv1alpha1.VolumeBackupStatus{}
 )
+
+type CreateOpts struct {
+	Namespace          string
+	VolumeBackupName   string
+	ApplicationName    string
+	ContainerName      string
+	VolumeName         string
+	VolumeBackupStatus *volumebackupv1alpha1.VolumeBackupStatus
+}
 
 func NewVolumeBackup(namespace, volumeBackupName, applicationName, containerName, volumeName string, status *volumebackupv1alpha1.VolumeBackupStatus) *volumebackupv1alpha1.VolumeBackup {
 	return &volumebackupv1alpha1.VolumeBackup{
@@ -266,5 +278,62 @@ func NewOwnerReference(apiversion, kind, name string) v1.OwnerReference {
 		Name:               name,
 		Controller:         &isTrue,
 		BlockOwnerDeletion: &isTrue,
+	}
+}
+
+// This is an awful hack where I copied
+// github.com/kubernetes-csi/external-snapshotter/cmd/csi-snapshotter/main.CreateCRDs
+// and splatted it here so I can get the envtest server to understand these kinds without having access
+// to CRD yamls for them
+func CreateSnapshotCRDs() []*apiextensionsv1beta1.CustomResourceDefinition {
+	return []*apiextensionsv1beta1.CustomResourceDefinition{
+		&apiextensionsv1beta1.CustomResourceDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: v1alpha1.VolumeSnapshotClassResourcePlural + "." + v1alpha1.GroupName,
+			},
+			Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
+				Group:   v1alpha1.GroupName,
+				Version: v1alpha1.SchemeGroupVersion.Version,
+				Scope:   apiextensionsv1beta1.ClusterScoped,
+				Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
+					Plural: v1alpha1.VolumeSnapshotClassResourcePlural,
+					Kind:   reflect.TypeOf(v1alpha1.VolumeSnapshotClass{}).Name(),
+				},
+				Subresources: &apiextensionsv1beta1.CustomResourceSubresources{
+					Status: &apiextensionsv1beta1.CustomResourceSubresourceStatus{},
+				},
+			},
+		},
+		&apiextensionsv1beta1.CustomResourceDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: v1alpha1.VolumeSnapshotContentResourcePlural + "." + v1alpha1.GroupName,
+			},
+			Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
+				Group:   v1alpha1.GroupName,
+				Version: v1alpha1.SchemeGroupVersion.Version,
+				Scope:   apiextensionsv1beta1.ClusterScoped,
+				Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
+					Plural: v1alpha1.VolumeSnapshotContentResourcePlural,
+					Kind:   reflect.TypeOf(v1alpha1.VolumeSnapshotContent{}).Name(),
+				},
+			},
+		},
+		&apiextensionsv1beta1.CustomResourceDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: v1alpha1.VolumeSnapshotResourcePlural + "." + v1alpha1.GroupName,
+			},
+			Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
+				Group:   v1alpha1.GroupName,
+				Version: v1alpha1.SchemeGroupVersion.Version,
+				Scope:   apiextensionsv1beta1.NamespaceScoped,
+				Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
+					Plural: v1alpha1.VolumeSnapshotResourcePlural,
+					Kind:   reflect.TypeOf(v1alpha1.VolumeSnapshot{}).Name(),
+				},
+				Subresources: &apiextensionsv1beta1.CustomResourceSubresources{
+					Status: &apiextensionsv1beta1.CustomResourceSubresourceStatus{},
+				},
+			},
+		},
 	}
 }

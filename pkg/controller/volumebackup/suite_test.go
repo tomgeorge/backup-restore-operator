@@ -3,6 +3,7 @@ package volumebackup
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 
@@ -20,6 +21,8 @@ import (
 	"k8s.io/client-go/rest"
 	core "k8s.io/client-go/testing"
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -68,6 +71,7 @@ type testCase struct {
 }
 
 func runInTestHarness(t *testing.T, test testCase) {
+	logf.SetLogger(zap.LoggerTo(os.Stdout, true))
 	snapshotscheme.AddToScheme(scheme.Scheme)
 	volumebackupv1alpha1.AddToScheme(scheme.Scheme)
 	backupsv1alpha1.AddToScheme(scheme.Scheme)

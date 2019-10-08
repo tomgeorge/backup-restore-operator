@@ -9,10 +9,12 @@ import (
 	"github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
 	snapclientset "github.com/kubernetes-csi/external-snapshotter/pkg/client/clientset/versioned"
 	backupsv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
+	"github.com/tomgeorge/backup-restore-operator/pkg/util"
 	"github.com/tomgeorge/backup-restore-operator/pkg/util/executor"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kubeErrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -107,6 +109,12 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 
 	// Fetch the VolumeBackup instance
 	instance := &backupsv1alpha1.VolumeBackup{}
+
+	util := &util.BackupRestoreUtils{
+		Client: r.client,
+		Cfg:    r.config,
+	}
+
 	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
 	if err != nil {
 		if kubeErrors.IsNotFound(err) {
@@ -118,7 +126,9 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
-	reqLogger.Info(fmt.Sprintf("Deployment to grab hook from is %v in namespace %v", instance.Spec.ApplicationName, instance.ObjectMeta.Namespace))
+	reqLogger.Info(fmt.Sprintf("Deployment to grab hook from is %v in namespace %v",
+		instance.Spec.ApplicationName,
+		instance.ObjectMeta.Namespace))
 
 	// TODO: Change ApplicationName to just a pod selector
 	deployment := &appsv1.Deployment{}
@@ -239,7 +249,7 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 				Requeue: true,
 			}, err
 		}
-		if snapshot.Status.CreationTime != nil && snapshot.Status.ReadyToUse {
+		if snapshot.Status.CreationTime != nil {
 			instance.UpdateStatus(backupsv1alpha1.SnapshotCreated, backupsv1alpha1.ConditionTrue, "SnapshotReadyToUse", "Finished creating Volume Snapshot")
 			err = r.client.Status().Update(context.TODO(), instance)
 			if err != nil {
@@ -266,6 +276,174 @@ func (r *ReconcileVolumeBackup) Reconcile(request reconcile.Request) (reconcile.
 		}
 		return reconcile.Result{}, nil
 	}
+
+	storageAPIGroup := v1alpha1.GroupName
+
+	if !instance.IsSnapshotUploading() {
+		restorePVC := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      instance.Name + "-restore",
+				Namespace: instance.Namespace,
+			},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{"storage": *resource.NewQuantity(1111111110, resource.BinarySI)},
+				},
+				DataSource: &corev1.TypedLocalObjectReference{
+					APIGroup: &storageAPIGroup,
+					Kind:     "VolumeSnapshot",
+					Name:     util.GetVolumeSnapshotFromCR(instance, &podToExec),
+				},
+				AccessModes: []corev1.PersistentVolumeAccessMode{
+					"ReadWriteOnce",
+				},
+			},
+		}
+
+		isController := true
+		restorePVC.SetOwnerReferences([]metav1.OwnerReference{
+			{
+				APIVersion: v1alpha1.GroupName,
+				Kind:       instance.Kind,
+				Name:       instance.Name,
+				UID:        instance.GetUID(),
+				Controller: &isController,
+			},
+		})
+
+		err = r.client.Create(context.TODO(), restorePVC)
+		if err != nil {
+			reqLogger.Error(err, "Error creating PVC based off of VolumeSnapshot")
+			return reconcile.Result{}, err
+		}
+
+		provider, err := r.GetBackupProviderFromBackup(instance)
+		if err != nil {
+			reqLogger.Error(err, "Could not get secret from provider name")
+			return reconcile.Result{}, err
+		}
+
+		uploaderPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      instance.Name + "-uploader",
+				Namespace: instance.Namespace,
+			},
+			Spec: corev1.PodSpec{
+				Volumes: []corev1.Volume{
+					{
+						Name: "volume-to-backup",
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: restorePVC.GetName()},
+						},
+					},
+				},
+				RestartPolicy: corev1.RestartPolicyOnFailure,
+				Containers: []corev1.Container{
+					{
+						Name:            "s3-uploader",
+						ImagePullPolicy: corev1.PullAlways,
+						Image:           "docker.io/tomgeorge/do-s3-uploader:latest",
+						Env: []corev1.EnvVar{
+							{
+								Name:  "SPACES_BUCKET_NAME",
+								Value: instance.Spec.BucketName,
+							},
+							{
+								Name:  "SPACES_ENDPOINT",
+								Value: instance.Spec.BucketEndpoint,
+							},
+							{
+								Name:  "TAR_DIR",
+								Value: "/etc/backup",
+							},
+							{
+								Name: "SPACES_KEY",
+								ValueFrom: &corev1.EnvVarSource{
+									SecretKeyRef: &corev1.SecretKeySelector{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: provider.Spec.SecretName,
+										},
+										Key: "s3Key",
+									},
+								},
+							},
+							{
+								Name: "SPACES_SECRET",
+								ValueFrom: &corev1.EnvVarSource{
+									SecretKeyRef: &corev1.SecretKeySelector{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: provider.Spec.SecretName,
+										},
+										Key: "s3SecretKey",
+									},
+								},
+							},
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{
+								Name:      "volume-to-backup",
+								MountPath: "/etc/backup",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		uploaderPod.SetOwnerReferences([]metav1.OwnerReference{
+			{
+				APIVersion: instance.APIVersion,
+				UID:        instance.UID,
+				Kind:       "VolumeBackup",
+				Name:       instance.Name,
+				Controller: &isController,
+			},
+		})
+
+		if err = r.client.Create(context.TODO(), uploaderPod); err != nil {
+			reqLogger.Error(err, "Could not create uploader pod")
+			return reconcile.Result{}, err
+		}
+
+		instance.UpdateStatus(backupsv1alpha1.SnapshotUploading, backupsv1alpha1.ConditionTrue, "SnapshotUploading", "Uploader pod created")
+		err = r.client.Status().Update(context.TODO(), instance)
+		if err != nil {
+			reqLogger.Error(err, "Error updating the status of the VolumeBackup", "Name", instance.Name)
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
+	}
+
+	if instance.Status.Phase == backupsv1alpha1.SnapshotUploading && !instance.IsPodFrozen() {
+		uploaderPod := &corev1.Pod{}
+		if err := r.client.Get(context.TODO(), types.NamespacedName{Namespace: instance.Namespace, Name: instance.Name + "-uploader"}, uploaderPod); err != nil {
+			reqLogger.Error(err, "Could not get uploader pod")
+			return reconcile.Result{}, err
+		}
+		if uploaderPod.Status.Phase == corev1.PodSucceeded {
+			instance.UpdateStatus(backupsv1alpha1.SnapshotUploaded, backupsv1alpha1.ConditionTrue, "SnapshotUploadedToObjectStore", "Upload to object storesucceeded")
+			if err = r.client.Status().Update(context.TODO(), instance); err != nil {
+				reqLogger.Error(err, "Could not update volumebackup status")
+				return reconcile.Result{}, err
+			}
+			return reconcile.Result{}, nil
+		}
+	}
+
+	if instance.Status.Phase == backupsv1alpha1.SnapshotUploaded && !instance.IsPodFrozen() {
+		reqLogger.Info("Deleting uploader pod")
+		uploaderPod := &corev1.Pod{}
+		if err := r.client.Get(context.TODO(), types.NamespacedName{Namespace: instance.Namespace, Name: instance.Name + "-uploader"}, uploaderPod); err != nil {
+			reqLogger.Error(err, "Could not get uploader pod")
+			return reconcile.Result{}, err
+		}
+		if err := r.client.Delete(context.TODO(), uploaderPod); err != nil {
+			reqLogger.Error(err, "Could not delete uploader pod")
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
+	}
+
 	// TODO: Check VolumeSnapshot.Status Creation date before unfreezing
 	// TODO: Check if the pod is unfrozen before unfreezing.  If the creation date exists, and the pod is still frozen, then unfreeze
 
@@ -347,6 +525,7 @@ func (r *ReconcileVolumeBackup) requestCreate(snapshot *v1alpha1.VolumeSnapshot,
 		log.Error(err, "Unable to set owner reference of %v", snapshot.Name)
 		return err
 	}
+
 	_, err := r.snapClientset.SnapshotV1alpha1().VolumeSnapshots(instance.Namespace).Create(snapshot)
 	if err != nil {
 		log.Error(err, "Error creating VolumeSnapshot")
@@ -370,4 +549,28 @@ func (r *ReconcileVolumeBackup) freeze(pod *corev1.Pod) error {
 	command = append(command, preHook)
 	_, err := r.executor.DoRemoteExec(pod, command)
 	return err
+}
+
+func (r *ReconcileVolumeBackup) GetSecretFromProviderName(cr *backupsv1alpha1.VolumeBackup) (*corev1.Secret, error) {
+	provider := &backupsv1alpha1.VolumeBackupProvider{}
+	if err := r.client.Get(context.TODO(), types.NamespacedName{Namespace: cr.Namespace, Name: cr.Spec.BackupProviderName}, provider); err != nil {
+		log.Error(err, "Could not get VolumeBackupProvider")
+		return nil, err
+	}
+
+	secret := &corev1.Secret{}
+	if err := r.client.Get(context.TODO(), types.NamespacedName{Namespace: cr.Namespace, Name: provider.Spec.SecretName}, secret); err != nil {
+		log.Error(err, "Could not get S3 secret")
+		return nil, err
+	}
+	return secret, nil
+}
+
+func (r *ReconcileVolumeBackup) GetBackupProviderFromBackup(cr *backupsv1alpha1.VolumeBackup) (*backupsv1alpha1.VolumeBackupProvider, error) {
+	provider := &backupsv1alpha1.VolumeBackupProvider{}
+	if err := r.client.Get(context.TODO(), types.NamespacedName{Namespace: cr.Namespace, Name: cr.Spec.BackupProviderName}, provider); err != nil {
+		log.Error(err, "Could not get VolumeBackupProvider")
+		return nil, err
+	}
+	return provider, nil
 }

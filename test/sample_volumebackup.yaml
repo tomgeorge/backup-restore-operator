@@ -7,3 +7,6 @@ spec:
   applicationName: mysql
   containerName: mysql
   volumeName: mysql
+  backupProviderName: cluster-level-volume-backup-provider
+  bucketName: tgeorge-backups
+  bucketEndpoint: sfo2.digitaloceanspaces.com

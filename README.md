@@ -158,9 +158,14 @@ Given a request for backup of a pvc:
 Find all the pods that use that pvc
 Call freeze
 Use snapshot.external-storage.k8s.io api to create snapshot
-Watch VolumeSnapshot object until it has an id
+Watch VolumeSnapshot object until it has a timestamp 
 Unfreeze the pods
-Watch the VolumeSnapshot to wait for the upload to complete (get some ID that corresponds to the uploaded data)
+Watch the VolumeSnapshot to wait for the upload to complete (wait for readyToUse)
+Create a VolumeClaim that has the source set to the VolumeSnapshot object
+Create a Pod with the VolumeClaim mounted inside of it
+Sync the mount point with an object store (rsync, restic, look for tools)
+Need two fields for this: the backup provider and the subdirectory 
+
 
 
 ### Restore Flow

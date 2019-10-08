@@ -3,6 +3,19 @@ kind: CustomResourceDefinition
 metadata:
   name: volumebackups.backups.example.com
 spec:
+  additionalPrinterColumns:
+  - JSONPath: .spec.applicationName
+    description: The application to backup
+    name: Application
+    type: string
+  - JSONPath: .status.phase
+    description: The current phase of the backup
+    name: Backup Phase
+    type: string
+  - JSONPath: .status.podPhase
+    description: The current phase that the application pod is in (Frozen or Unfrozen)
+    name: Pod Phase
+    type: string
   group: backups.example.com
   names:
     kind: VolumeBackup
@@ -77,6 +90,10 @@ spec:
                 - status
                 type: object
               type: array
+            phase:
+              type: string
+            podPhase:
+              type: string
           type: object
   version: v1alpha1
   versions:

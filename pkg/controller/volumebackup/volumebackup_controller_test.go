@@ -7,6 +7,7 @@ import (
 
 	backupsv1alpha1 "github.com/tomgeorge/backup-restore-operator/pkg/apis/backups/v1alpha1"
 	testHelpers "github.com/tomgeorge/backup-restore-operator/pkg/controller/test/helpers"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -67,6 +68,27 @@ func TestReconcile(t *testing.T) {
 				},
 				{
 					Type:   backupsv1alpha1.SnapshotCreated,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+			},
+		}
+		statusUploading = &backupsv1alpha1.VolumeBackupStatus{
+			PodPhase: backupsv1alpha1.PhaseFrozen,
+			Conditions: []backupsv1alpha1.VolumeBackupCondition{
+				{
+					Type:   backupsv1alpha1.PodFrozen,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+				{
+					Type:   backupsv1alpha1.SnapshotIssued,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+				{
+					Type:   backupsv1alpha1.SnapshotCreated,
+					Status: backupsv1alpha1.ConditionTrue,
+				},
+				{
+					Type:   backupsv1alpha1.SnapshotUploading,
 					Status: backupsv1alpha1.ConditionTrue,
 				},
 			},
@@ -147,6 +169,51 @@ func TestReconcile(t *testing.T) {
 				core.NewGetAction(gvr, namespace, "example-application-to-backup-test-claim-0"),
 			},
 			expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, claimName, statusSnapshotCreated),
+			expectedResult: reconcile.Result{
+				Requeue: false,
+			},
+			expectedError: nil,
+		},
+		{
+			name: "SnapshotIssued, should wait for a ReadyToUse/CreationTimestamp on the Snapshot and then update the status to SnapshotCreated",
+			objs: []runtime.Object{
+				testHelpers.NewDeployment(namespace, applicationName, &replicas),
+				testHelpers.NewPod(namespace, applicationName, 1),
+				testHelpers.NewPersistentVolume(volumeName),
+				testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
+			},
+			snapshotObjs: []runtime.Object{
+				testHelpers.NewReadyVolumeSnapshot(namespace, "example-application-to-backup-test-claim-0", claimName),
+			},
+			volumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, claimName, statusSnapshotIssued),
+			expectedKubeActions: []core.Action{
+				core.NewUpdateAction(gvr, namespace, testHelpers.NewVolumeBackup(namespace, "example-application-to-backup-test-claim-0", applicationName, containerName, claimName, statusSnapshotIssued)),
+			},
+			expectedSnapshotActions: []core.Action{
+				core.NewGetAction(gvr, namespace, "example-application-to-backup-test-claim-0"),
+			},
+			expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, claimName, statusSnapshotCreated),
+			expectedResult: reconcile.Result{
+				Requeue: false,
+			},
+			expectedError: nil,
+		},
+		{
+			name: "SnapshotCreated, should create a pod and like upload it and shit",
+			objs: []runtime.Object{
+				testHelpers.NewDeployment(namespace, applicationName, &replicas),
+				testHelpers.NewPod(namespace, applicationName, 1),
+				testHelpers.NewPersistentVolume(volumeName),
+				testHelpers.NewPersistentVolumeClaim(namespace, claimName, volumeName),
+			},
+			snapshotObjs: []runtime.Object{
+				testHelpers.NewReadyVolumeSnapshot(namespace, "example-application-to-backup-test-claim-0", claimName),
+			},
+			volumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, claimName, statusSnapshotCreated),
+			expectedKubeActions: []core.Action{
+				core.NewCreateAction(gvr, namespace, &corev1.Pod{}),
+			},
+			expectedVolumeBackup: testHelpers.NewVolumeBackup(namespace, name, applicationName, containerName, claimName, statusUploading),
 			expectedResult: reconcile.Result{
 				Requeue: false,
 			},

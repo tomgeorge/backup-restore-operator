@@ -7,22 +7,41 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// VolumeBackup is the Schema for the volumebackups API
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:openapi-gen=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Application",type="string",JSONPath=".spec.applicationName",description="The application to backup"
+// +kubebuilder:printcolumn:name="Backup Phase",type="string",JSONPath=".status.phase",description="The current phase of the backup"
+// +kubebuilder:printcolumn:name="Pod Phase",type="string",JSONPath=".status.podPhase",description="The current phase that the application pod is in (Frozen or Unfrozen)"
+type VolumeBackup struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   VolumeBackupSpec   `json:"spec,omitempty"`
+	Status VolumeBackupStatus `json:"status,omitempty"`
+}
+
 // VolumeBackupSpec defines the desired state of VolumeBackup
 // +k8s:openapi-gen=true
 type VolumeBackupSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	// Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html
-	ApplicationName string `json:"applicationName"`
-	VolumeName      string `json:"volumeName"`
-	ContainerName   string `json:"containerName"`
+	ApplicationName    string `json:"applicationName"`
+	VolumeName         string `json:"volumeName"`
+	ContainerName      string `json:"containerName"`
+	BackupProviderName string `json:"backupProviderName"`
+	BucketName         string `json:"bucketName"`
+	BucketEndpoint     string `json:"bucketEndpoint"`
 }
 
 // VolumeBackupStatus defines the observed state of VolumeBackup
 type VolumeBackupStatus struct {
 	// The list of VolumeBackupConditions that the Backup goes through
-	Conditions []VolumeBackupCondition `json:"conditions,omitempty"`
-	PodPhase   VolumeBackupPodPhase    `json:"podPhase,omitempty"`
+	Conditions []VolumeBackupCondition   `json:"conditions,omitempty"`
+	Phase      VolumeBackupConditionType `json:"phase,omitempty"`
+	PodPhase   VolumeBackupPodPhase      `json:"podPhase,omitempty"`
 }
 
 type VolumeBackupPodPhase string
@@ -31,22 +50,6 @@ const (
 	PhaseFrozen   VolumeBackupPodPhase = "Frozen"
 	PhaseUnfrozen VolumeBackupPodPhase = "Unfrozen"
 )
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// VolumeBackupStatusList contains a list of VolumeBackup
-// type VolumeBackupStatusList struct {
-// 	metav1.TypeMeta `json:",inline"`
-// 	metav1.ListMeta `json:"metadata,omitempty"`
-// 	Items           []VolumeBackupStatus `json:"items"`
-// }
-
-// // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// // VolumeBackupConditionList contains a list of VolumeBackup
-// type VolumeBackupConditionList struct {
-// 	metav1.TypeMeta `json:",inline"`
-// 	metav1.ListMeta `json:"metadata,omitempty"`
-// 	Items           []VolumeBackupCondition `json:"items"`
-// }
 
 type VolumeBackupCondition struct {
 	// Type is the type of the condition.
@@ -71,13 +74,6 @@ type VolumeBackupCondition struct {
 	Message string `json:"message,omitempty"`
 }
 
-///
-// Status:
-//   Conditions:
-//   [
-//     [ PodFrozen, True]
-//     [ SnapshotIssued, True]
-//     [ SnapshotCreated, False]?
 const (
 	PodFrozen         VolumeBackupConditionType = "PodFrozen"
 	SnapshotIssued    VolumeBackupConditionType = "SnapshotIssued"
@@ -102,18 +98,6 @@ const (
 	ConditionFalse   ConditionStatus = "False"
 	ConditionUnknown ConditionStatus = "Unknown"
 )
-
-// VolumeBackup is the Schema for the volumebackups API
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:openapi-gen=true
-// +kubebuilder:subresource:status
-type VolumeBackup struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   VolumeBackupSpec   `json:"spec,omitempty"`
-	Status VolumeBackupStatus `json:"status,omitempty"`
-}
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // VolumeBackupList contains a list of VolumeBackup
@@ -143,6 +127,10 @@ func (vb *VolumeBackup) IsSnapshotCreated() bool {
 	return vb.checkStatus(SnapshotCreated)
 }
 
+func (vb *VolumeBackup) IsSnapshotUploading() bool {
+	return vb.checkStatus(SnapshotUploading)
+}
+
 func (vb *VolumeBackup) checkStatus(conditionType VolumeBackupConditionType) bool {
 	for _, condition := range vb.Status.Conditions {
 		if condition.Type == conditionType {
@@ -167,5 +155,6 @@ func (vb *VolumeBackup) UpdateStatus(conditionType VolumeBackupConditionType, co
 		}
 	}
 	vb.Status.Conditions = append(vb.Status.Conditions, newCondition)
+	vb.Status.Phase = conditionType
 	return
 }
