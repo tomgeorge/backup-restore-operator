@@ -10,6 +10,9 @@ all: manager
 test: fmt vet 
 	go test -v ./pkg/api/... ./pkg/controller/... -coverprofile cover.out
 
+e2e: fmt vet
+	go test -v ./e2e/...
+
 # Build manager binary
 manager: generate fmt vet
 	go build -o bin/manager ./cmd/manager/main.go

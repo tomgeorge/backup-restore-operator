@@ -44,8 +44,8 @@ func TestGetVolumeSnapshotFromCR(t *testing.T) {
 		t.Run(name, func(*testing.T) {
 			fixture := testCase.fixture
 			utils := &BackupRestoreUtils{
-				client: fakeClient.NewFakeClientWithScheme(scheme.Scheme, fixture.objs...),
-				cfg:    &rest.Config{},
+				Client: fakeClient.NewFakeClientWithScheme(scheme.Scheme, fixture.objs...),
+				Cfg:    &rest.Config{},
 			}
 			pod, ok := fixture.objs[0].(*corev1.Pod)
 			if !ok {
